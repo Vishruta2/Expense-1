@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Dashboard</title>
+</head>
+<body>
+  <h1>Welcome to the Dashboard</h1>
+
+  <!-- Show messages as popups -->
+  <script id="messages-json" type="application/json">
+    [
+      {% if messages %}
+        {% for message in messages %}
+          "{{ message|escapejs }}"{% if not forloop.last %},{% endif %}
+        {% endfor %}
+      {% endif %}
+    ]
+  </script>
+  <script>
+    (function () {
+      try {
+        var el = document.getElementById("messages-json");
+        if (!el) return;
+        var msgs = JSON.parse(el.textContent || "[]");
+        (msgs || []).forEach(function (m) { alert(m); });
+      } catch (e) {
+        console.error("Failed to parse messages:", e);
+      }
+    })();
+  </script>
+</body>
+</html>
