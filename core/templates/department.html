@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Department Head Dashboard</title>
+<style>
+  :root{
+    --bg:#7bc184;
+    --card:#fff;
+    --text:#0f172a;
+    --muted:#6b7280;
+    --primary:#4CAF50;
+    --primary-hover:#45a049;
+    --ring:rgba(76,175,80,.25);
+    --shadow:0 24px 48px rgba(0,0,0,.16);
+  }
+  *{box-sizing:border-box}
+ body{ margin:0; font-family:system-ui,Arial,sans-serif; background:var(--pastel-dark); min-height:100vh; color:var(--text); }
+    .logo-header{ background:#000; padding:10px 18px; display:flex; align-items:center; }
+    .logo{ height:35px; width:auto; }
+
+    /* Container & layout (keep your left menu + right content) */
+    .container{
+      background:#fff; margin:30px; border-radius:16px; box-shadow:var(--card-shadow);
+      padding:22px; display:grid; grid-template-columns:220px 1fr; gap:24px;
+    }
+    .header{ grid-column:1 / -1; text-align:center; font-size:28px; margin:4px 0 10px; color:#111; letter-spacing:.2px; }
+  /* === BIGGER APP CONTAINER (wider + taller) === */
+  .app{
+    max-width:1400px;                /* wider than before */
+    margin:28px auto;
+    padding:22px;
+    background:var(--card);
+    border-radius:24px;
+    box-shadow:var(--shadow);
+  }
+  .app h1{ text-align:center; margin:6px 0 18px; font-size:36px; letter-spacing:.2px; }
+  .layout{ display:grid; grid-template-columns:260px 1fr; gap:28px; } /* wider rail + gap */
+  main{ min-height:72vh; }           /* taller content area on all pages */
+
+  /* === Left Menu === */
+  .rail{
+    position:sticky; top:14px; align-self:start;
+    background:#66bb6a; padding:12px; border-radius:16px;
+    box-shadow:0 10px 24px rgba(0,0,0,.08);
+  }
+  .rail-btn{
+    display:block;width:100%;text-align:left;cursor:pointer;
+    background:#43a047;color:#fff;border:none;border-radius:12px;
+    padding:13px 14px;font-weight:700;margin:0 0 12px 0;
+    border-bottom:1px solid rgba(0,0,0,.12);transition:.18s;
+  }
+  .rail-btn:hover{ background:#2e7d32; transform:translateY(-1px) }
+
+  /* Hide old dashboard grid buttons (we use the left rail) */
+  #dashboard .grid-2{ display:none }
+
+  /* === Content cards === */
+  .card{background:#f9fafb;border-radius:16px;border:1px solid #eef2f7;padding:20px;box-shadow:0 10px 26px rgba(0,0,0,.08)}
+  .content-card{background:#fff;border:1px solid #e9eef4;border-radius:16px;box-shadow:0 10px 26px rgba(0,0,0,.08);padding:20px;min-height:64vh}
+  h2{margin:0 0 14px}
+
+  .btn{display:inline-flex;justify-content:center;align-items:center;width:100%;
+    background:var(--primary);color:#fff;border:none;border-radius:12px;
+    padding:14px 16px;font-weight:700;cursor:pointer;transition:.18s}
+  .btn:hover{background:var(--primary-hover);transform:translateY(-1px)}
+  .btn-secondary{background:#e9ecef;color:#111;border:1px solid #d0d7de;padding:10px 14px;border-radius:8px;cursor:pointer;font-size:14px}
+  .btn-outline{background:#fff;color:#2e7d32;border:2px solid #2e7d32}
+  .btn-sm{padding:8px 12px;font-size:14px;border-radius:10px;font-weight:700;width:auto}
+
+  /* Back pill (unchanged) */
+  .btn-back{
+    display:inline-flex;gap:8px;align-items:center;padding:10px 14px;border-radius:999px;
+    border:1px solid #c8e6c9;background:#e8f5e9;color:#256029;font-weight:700;
+    text-decoration:none;width:auto;margin-bottom:10px
+  }
+
+  section.page{display:none}
+  section.page.show{display:block}
+
+  .actions{display:flex;flex-wrap:wrap;gap:10px}
+  .action-btn{padding:10px 12px;border-radius:8px;border:1px solid #4CAF50;background:#fff;color:#2e7d32;cursor:pointer;font-size:13px;transition:.18s}
+  .action-btn:hover{background:#e8f5e9}
+
+  .form{background:#fff;border:1px solid #e9e9e9;border-radius:10px;padding:16px;position:relative}
+  .form-row{margin-bottom:12px}
+  .form-row label{display:block;font-size:14px;color:#333;margin-bottom:6px}
+  .form-row input[type="text"], .form-row input[type="date"], .form-row input[type="datetime-local"],
+  .form-row input[type="file"], .form-row textarea, .form-row select{
+    width:100%;padding:10px;border:1px solid #888;border-radius:8px;font-size:14px;background:#fff
+  }
+  .form-row textarea{min-height:90px;resize:vertical}
+  .form-actions{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
+  .claim-stamp{position:absolute;top:10px;right:12px;background:#f1f8e9;border:1px solid #cfe3c4;color:#1b5e20;padding:6px 10px;border-radius:8px;font-weight:700;font-size:13px}
+
+  .table-wrap{overflow:auto;background:#fff;border:1px solid #e5e7eb;border-radius:10px;margin-bottom:18px}
+  table.data{width:100%;border-collapse:collapse;font-size:14px}
+  table.data th,table.data td{border:1px solid #e5e7eb;padding:8px;text-align:left}
+  .muted{color:#6b7280;font-size:12px;display:block;margin-top:4px}
+  .s-pending{color:#9a6700}.s-approved{color:#116329}.s-auto{color:#1b4b91}.s-rejected{color:#a40e26}
+
+  /* Travel helpers (unchanged) */
+  .travel-title{text-align:center;font-weight:700;margin-bottom:10px}
+  .travel-table{width:100%;border-collapse:collapse;margin-bottom:12px;table-layout:fixed}
+  .travel-table th,.travel-table td{border:1px solid #444;padding:6px;vertical-align:middle}
+  .travel-table input{width:95%;padding:8px;border:1px solid #888;border-radius:6px;background:#fff;font-size:14px}
+  .exp-card{background:#fff;border:1px solid #e3e3e3;border-radius:10px;padding:12px;margin:10px 0;display:none;position:relative}
+  .exp-card.active{display:block}
+  .exp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .exp-grid .cell{display:flex;flex-direction:column}
+  .summary-wrap{margin-top:12px;border:1px solid #cfd8dc;border-radius:10px;background:#fff;overflow:hidden}
+  .summary-head{background:#f1f8e9;padding:8px 10px;font-weight:800;border-bottom:1px solid #cfd8dc}
+  .sum-table{width:100%;border-collapse:collapse}
+  .sum-table th,.sum-table td{border:1px solid #e0e0e0;padding:8px}
+  .sum-amount{text-align:right}
+  .summary-total{font-size:18px;font-weight:bold;background:#f7f7f7}
+
+  /* Ledger */
+  #dv-ledger h2{text-align:center}
+  .ledger-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  .ledger-title{font-size:28px;letter-spacing:1px;font-weight:800}
+  .ledger-total{border:1px solid #111;border-collapse:collapse}
+  .ledger-total th,.ledger-total td{border:1px solid #111;padding:6px 10px}
+  .ledger-box{border:1px solid #111;border-collapse:collapse;width:100%}
+  .ledger-box th,.ledger-box td{border:1px solid #111;padding:8px}
+  .ledger-actions{display:flex;gap:8px;margin:10px 0}
+  .ledger-actions .btn-secondary{padding:8px 10px}
+  .ledger-wrap{background:#fff;border:1px solid #111;padding:14px;border-radius:8px}
+  .number{text-align:right}
+
+  @media print {
+  body { background:#fff; }
+
+  /* Hide everything except the ledger */
+  body * {
+    visibility: hidden;
+  }
+  #dv-ledger, #dv-ledger * {
+    visibility: visible;
+  }
+  #dv-ledger {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+
+  /* Remove back button and print button */
+  #dv-ledger .btn-back,
+  #dv-ledger .ledger-actions {
+    display: none !important;
+  }
+
+  /* Optional: remove app box styling */
+  .app {
+    box-shadow: none;
+    margin: 0;
+    border-radius: 0;
+    background: #fff;
+  }
+}
+
+  /* Cash Voucher small table */
+  .small-table{width:100%;border-collapse:collapse}
+  .small-table th,.small-table td{padding:8px;border-bottom:1px solid #eee;font-size:13px}
+  .right{text-align:right}
+  #cashForm .form-row input,
+  #cashForm .form-row select,
+  #cashForm .form-row textarea{width:380px;max-width:100%;font-size:14px;padding:8px 10px}
+
+  /* ===== MOBILE: rail becomes header; hide it AFTER a click ===== */
+  @media (max-width: 900px){
+    .app{margin:14px; padding:16px}
+    .app h1{font-size:28px; margin:4px 0 12px}
+    .layout{grid-template-columns:1fr; gap:14px}
+    .rail{
+      display:flex; flex-wrap:wrap; gap:8px; position:static;
+      background:#66bb6a; padding:10px; border-radius:12px;
+    }
+    .rail-btn{flex:1 1 calc(50% - 8px); text-align:center; margin:0}
+    .card,.content-card{padding:16px}
+    h2{font-size:20px; margin-bottom:12px}
+    .table-wrap{overflow-x:auto; -webkit-overflow-scrolling:touch}
+    table.data th, table.data td{white-space:nowrap}
+    .btn-back{margin-top:4px}
+
+    /* hide menu only when JS toggles the class on body */
+    body.rail-hidden .rail{ display:none; }
+  }
+  @media (max-width:480px){
+    .rail-btn{flex:1 1 100%}
+  }
+</style>
+</head>
+<body>
+  <div class="logo-header">
+    <img class="logo" src="logo.png" alt="Company Logo">
+  </div>
+
+<div class="app">
+  <h1>Department Head Dashboard</h1>
+
+  <div class="layout">
+    <!-- Left menu -->
+    <aside class="rail" aria-label="Main actions">
+      <button class="rail-btn" data-target="#dv-upload">Upload Voucher</button>
+      <button class="rail-btn" data-target="#dv-payment-form">Submit Payment Request</button>
+      <button class="rail-btn" data-target="#dv-view-pr">View Payment Request</button>
+      <button class="rail-btn" data-target="#dv-ledger">Download Ledger</button>
+      <button class="rail-btn" data-target="#dv-view-voucher">View Voucher</button>
+      <button class="rail-btn" data-target="#dv-reports">Reports</button>
+      <button class="rail-btn" data-target="#dv-approval">Approval Pending</button>
+      <button class="rail-btn" data-target="#dv-workorder">Workorder Update</button>
+    </aside>
+
+    <!-- Right content -->
+    <main>
+
+      <!-- DASHBOARD (kept; grid hidden by CSS) -->
+      <section id="dashboard" class="page show">
+        <div class="card">
+          <div class="grid-2">
+            <!-- hidden (we use left menu instead) -->
+            <button class="btn" data-target="#dv-upload">Upload Voucher</button>
+            <button class="btn" data-target="#dv-payment-form">Payment Request</button>
+            <button class="btn" data-target="#dv-ledger">Download Ledger</button>
+            <button class="btn" data-target="#dv-reports">Reports</button>
+            <button class="btn" data-target="#dv-view-voucher">View Voucher</button>
+            <button class="btn" data-target="#dv-view-pr">View PR</button>
+            <button class="btn" data-target="#dv-approval">Approval Pending</button>
+            <button class="btn" data-target="#dv-workorder">Workorder Update</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- REPORTS HOME -->
+      <section id="dv-reports" class="page">
+        <div class="content-card">
+          <a class="btn-back" data-target="#dashboard">← Back</a>
+          <h2>Reports</h2>
+          <div class="actions">
+            <button class="action-btn" data-target="#rpt-purchase">Purchase</button>
+            <button class="action-btn" data-target="#rpt-travel">Travel Voucher</button>
+            <button class="action-btn" data-target="#rpt-cash">Cash Voucher</button>
+            <button class="action-btn" data-target="#rpt-others">Other Voucher</button>
+            <button class="action-btn" data-target="#rpt-wo">Workorder wise</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Upload Voucher (chooser) ===== -->
+      <section id="dv-upload" class="page">
+        <div class="content-card">
+          <a class="btn-back" data-target="#dashboard">← Back</a>
+          <h2>Upload Voucher</h2>
+          <div class="actions">
+            <button class="action-btn" data-target="#dv-purchase">Purchase</button>
+            <button class="action-btn" data-target="#dv-travel">Travel Voucher</button>
+            <button class="action-btn" data-target="#dv-cash">Cash Voucher</button>
+            <button class="action-btn" data-target="#dv-others">Others</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Purchase Voucher -->
+      <section id="dv-purchase" class="page">
+        <div class="content-card">
+          <a class="btn-back" data-target="#dv-upload">← Back</a>
+          <h2>Purchase Voucher</h2>
+          <form class="form" id="purchaseForm" data-code="P">
+            <div class="claim-stamp">Claim No: <span class="claim-text">—</span></div>
+            <input type="hidden" class="claim" />
+            <div class="form-row"><label>Date:-</label><input id="pv-date" type="date" required /></div>
+            <div class="form-row"><label>Supplier Name:-</label><input id="pv-supplier" type="text" required /></div>
+            <div class="form-row"><label>Invoice No:-</label><input id="pv-invoice" type="text" /></div>
+            <div class="form-row"><label>Bill Date:-</label><input id="pv-billdate" type="date" required /></div>
+            <div class="form-row"><label>Amount:-</label><input id="pv-amt" type="text" required /></div>
+            <div class="form-row"><label>Work Order:-</label><input id="pv-wo" type="text" /></div>
+            <div class="form-row"><label>Remarks:-</label><input id="pv-remarks" type="text" /></div>
+            <div class="form-row"><label>Upload Bill:-</label><input id="pv-file" type="file" accept=".pdf,.jpg,.jpeg,.png" multiple /></div>
+            <div class="form-actions"><button type="submit" class="btn">Submit</button><button type="reset" class="btn-secondary">Reset</button></div>
+          </form>
+        </div>
+      </section>
+
+      <!-- Travel Voucher -->
+      <section id="dv-travel" class="page">
+        <div class="content-card">
+          <a class="btn-back" data-target="#dv-upload">← Back</a>
+          <h2>Travel Voucher</h2>
+          <form class="form" id="travelForm" data-code="T">
+            <div class="claim-stamp">Claim No: <span class="claim-text">—</span></div>
+            <input type="hidden" class="claim" />
+            <div class="travel-title">TRAVELING ALLOWANCE</div>
+            <table class="travel-table">
+              <tr><td><b>Project Name / W.O # :</b><input id="tv-wo" type="text" required></td><td><b>Date :</b><input id="tv-date" type="date" required></td></tr>
+              <tr><td><b>Customer :</b><input id="tv-customer" type="text" required></td><td><b>Name :</b><input id="tv-name" type="text" required></td></tr>
+              <tr><td><b>Designation :</b><input id="tv-desig" type="text" required></td><td><b>Place of Visit :</b><input id="tv-place" type="text" required></td></tr>
+              <tr><td><b>Purpose of Journey :</b><input id="tv-purpose" type="text" required></td><td><b>Visit Authorised By :</b><input id="tv-auth" type="text"></td></tr>
+              <tr><td><b>From (Date) :</b><input id="tv-from" type="date" required></td><td><b>To (Date) :</b><input id="tv-to" type="date" required></td></tr>
+            </table>
+            <div class="form-actions" style="margin-top:12px;"><button type="submit" class="btn">Submit Travel Voucher</button><button type="reset" class="btn-secondary">Reset All</button></div>
+            <div class="actions" style="margin:8px 0 2px;"><button class="action-btn" type="button" data-exp="fare">Travel Fare</button><button class="action-btn" type="button" data-exp="local">Local Travel</button><button class="action-btn" type="button" data-exp="hotel">Hotel Accommodation</button><button class="action-btn" type="button" data-exp="da">Daily & Food Allowance</button><button class="action-btn" type="button" data-exp="misc">Miscellaneous Expenses</button></div>
+
+            <!-- A..E subcards (same) -->
+            <div class="exp-card" id="card-fare">
+              <div class="claim-stamp">Claim No: <span class="claim-text-inline">—</span></div>
+              <h3>(A) Travel Fare</h3>
+              <div class="exp-grid">
+                <div class="cell"><label>Sl No</label><input type="text" id="fare-sl"></div>
+                <div class="cell"><label>From Place</label><input type="text" id="fare-from"></div>
+                <div class="cell"><label>To Place</label><input type="text" id="fare-to"></div>
+                <div class="cell"><label>Date & Time of Departure</label><input type="datetime-local" id="fare-dep"></div>
+                <div class="cell"><label>Date & Time of Arrival</label><input type="datetime-local" id="fare-arr"></div>
+                <div class="cell"><label>Mode of Transport</label><input type="text" id="fare-mode"></div>
+                <div class="cell"><label>Amount</label><input type="text" id="fare-amt"></div>
+                <div class="cell"><label>Ticket No</label><input type="text" id="fare-ticket"></div>
+                <div class="cell"><label>Ticket File</label><input type="file" id="fare-file" accept=".pdf,.jpg,.jpeg,.png" multiple></div>
+              </div>
+              <div class="form-actions"><button type="button" class="btn-secondary" data-addentry="fare">Add Entry</button><button type="button" class="btn" data-submit-section="fare">Submit</button><button type="button" class="btn-secondary" data-reset-section="fare">Reset</button></div>
+            </div>
+
+            <div class="exp-card" id="card-local">
+              <div class="claim-stamp">Claim No: <span class="claim-text-inline">—</span></div>
+              <h3>(B) Local Travel</h3>
+              <div class="exp-grid">
+                <div class="cell"><label>Date</label><input type="date" id="local-date"></div>
+                <div class="cell"><label>From</label><input type="text" id="local-from"></div>
+                <div class="cell"><label>To</label><input type="text" id="local-to"></div>
+                <div class="cell"><label>Mode</label><input type="text" id="local-mode"></div>
+                <div class="cell"><label>Amount</label><input type="text" id="local-amt"></div>
+                <div class="cell"><label>Remarks</label><input type="text" id="local-remarks"></div>
+              </div>
+              <div class="form-actions"><button type="button" class="btn-secondary" data-addentry="local">Add Entry</button><button type="button" class="btn" data-submit-section="local">Submit</button><button type="button" class="btn-secondary" data-reset-section="local">Reset</button></div>
+            </div>
+
+            <div class="exp-card" id="card-hotel">
+              <div class="claim-stamp">Claim No: <span class="claim-text-inline">—</span></div>
+              <h3>(C) Hotel Accommodation</h3>
+              <div class="exp-grid">
+                <div class="cell"><label>From Date</label><input type="date" id="hotel-from"></div>
+                <div class="cell"><label>To Date</label><input type="date" id="hotel-to"></div>
+                <div class="cell"><label>Hotel Name & Place</label><input type="text" id="hotel-name"></div>
+                <div class="cell"><label>Amount</label><input type="text" id="hotel-amt"></div>
+                <div class="cell"><label>Bill No</label><input type="text" id="hotel-bill"></div>
+                <div class="cell"><label>Bill File</label><input type="file" id="hotel-file" accept=".pdf,.jpg,.jpeg,.png" multiple></div>
+              </div>
+              <div class="form-actions"><button type="button" class="btn-secondary" data-addentry="hotel">Add Entry</button><button type="button" class="btn" data-submit-section="hotel">Submit</button><button type="button" class="btn-secondary" data-reset-section="hotel">Reset</button></div>
+            </div>
+
+            <div class="exp-card" id="card-da">
+              <div class="claim-stamp">Claim No: <span class="claim-text-inline">—</span></div>
+              <h3>(D) Daily Allowance & Food Allowance</h3>
+              <div class="exp-grid">
+                <div class="cell"><label>From Date & Time</label><input type="datetime-local" id="da-from"></div>
+                <div class="cell"><label>To Date & Time</label><input type="datetime-local" id="da-to"></div>
+                <div class="cell"><label>No of Days</label><input type="text" id="da-days"></div>
+                <div class="cell"><label>DA/FA</label><input type="text" id="da-type"></div>
+                <div class="cell"><label>Amount</label><input type="text" id="da-amt"></div>
+                <div class="cell"><label>Remarks</label><input type="text" id="da-remarks"></div>
+              </div>
+              <div class="form-actions"><button type="button" class="btn-secondary" data-addentry="da">Add Entry</button><button type="button" class="btn" data-submit-section="da">Submit</button><button type="button" class="btn-secondary" data-reset-section="da">Reset</button></div>
+            </div>
+
+            <div class="exp-card" id="card-misc">
+              <div class="claim-stamp">Claim No: <span class="claim-text-inline">—</span></div>
+              <h3>(E) Miscellaneous Expenses</h3>
+              <div class="exp-grid">
+                <div class="cell"><label>Date</label><input type="date" id="misc-date"></div>
+                <div class="cell"><label>Particulars</label><input type="text" id="misc-particulars"></div>
+                <div class="cell"><label>Amount</label><input type="text" id="misc-amt"></div>
+                <div class="cell"><label>Bill No</label><input type="text" id="misc-bill"></div>
+                <div class="cell"><label>Bill File</label><input type="file" id="misc-file" accept=".pdf,.jpg,.jpeg,.png" multiple></div>
+              </div>
+              <div class="form-actions"><button type="button" class="btn-secondary" data-addentry="misc">Add Entry</button><button type="button" class="btn" data-submit-section="misc">Submit</button><button type="button" class="btn-secondary" data-reset-section="misc">Reset</button></div>
+            </div>
+
+            <div class="summary-wrap">
+              <div class="summary-head">Summary</div>
+              <table class="sum-table" id="summaryTable">
+                <thead><tr><th style="width:70px;">Sl No</th><th>Main Contents</th><th style="width:140px;">Amount Claimed</th><th style="width:180px;">Remarks</th></tr></thead>
+                <tbody>
+                  <tr><td>A</td><td>Travel Fare</td><td class="sum-amount" id="sum-fare">0.00</td><td></td></tr>
+                  <tr><td>B</td><td>Local Travel</td><td class="sum-amount" id="sum-local">0.00</td><td></td></tr>
+                  <tr><td>C</td><td>Hotel Accommodation</td><td class="sum-amount" id="sum-hotel">0.00</td><td></td></tr>
+                  <tr><td>D</td><td>Daily Allowance & Food Allowance</td><td class="sum-amount" id="sum-da">0.00</td><td></td></tr>
+                  <tr><td>E</td><td>Miscellaneous Expenses</td><td class="sum-amount" id="sum-misc">0.00</td><td></td></tr>
+                </tbody>
+                <tfoot><tr class="summary-total"><th colspan="2" style="text-align:right;">Total Amount</th><th class="sum-amount" id="sum-total">0.00</th><th></th></tr></tfoot>
+              </table>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- Cash Voucher -->
+      <section id="dv-cash" class="page">
+        <div class="content-card">
+          <a class="btn-back" data-target="#dv-upload">← Back</a>
+          <h2>Cash Voucher</h2>
+          <form class="form" id="cashForm" data-code="C">
+            <div class="form-row"><label>Date:-</label><input id="cash-date" type="date" required /></div>
+            <div class="form-row"><label>Particulars:-</label><input id="cash-particulars" type="text" placeholder="Type particulars..." /></div>
+            <div class="form-row">
+              <label>HEAD OF ACCOUNT:-</label>
+              <select id="cash-head">
+                <option value="" selected disabled>-- Select Head of Account --</option>
+                <option>Conveyance</option><option>Staff Welfare Expenses</option><option>Printing & Stationary</option>
+                <option>Postage & Telegram</option><option>Vehicle Maintenance</option><option>Frieght(Inward / Forward)</option>
+                <option>Raw Materials</option><option>Consumable</option><option>Others</option>
+              </select>
+            </div>
+            <div class="form-row"><label>Amount:-</label><input id="cash-amount" type="number" step="0.01" min="0" placeholder="0.00" /></div>
+            <div class="form-actions"><button type="submit" class="btn">Submit</button><button type="reset" class="btn-secondary">Reset</button></div>
+
+            <div class="form-row">
+              <div class="table-wrap">
+                <table class="small-table" id="cashItemsTable">
+                  <thead><tr><th>Date</th><th>Particulars</th><th>Head of Account</th><th class="right">Amount</th></tr></thead>
+                  <tbody id="cashItemsBody"><tr><td colspan="4" class="muted">No items added.</td></tr></tbody>
+                  <tfoot><tr><th colspan="3" class="right">Total</th><th class="right">₹ <span id="cashTotal">0.00</span></th></tr></tfoot>
+                </table>
+              </div>
+            </div>
+            <input id="cashTotalInput" type="number" step="0.01" name="total" hidden />
+          </form>
+        </div>
+      </section>
+
+      <!-- Others Voucher -->
+      <section id="dv-others" class="page">
+        <div class="content-card">
+          <a class="btn-back" data-target="#dv-upload">← Back</a>
+          <h2>Others Voucher</h2>
+          <form class="form" id="othersForm" data-code="O">
+            <div class="claim-stamp">Claim No: <span class="claim-text">—</span></div>
+            <input type="hidden" class="claim" />
+            <div class="form-row"><label>Date:-</label><input id="ov-date" type="date" required /></div>
+            <div class="form-row"><label>Description:-</label><input id="ov-desc" type="text" required /></div>
+            <div class="form-row"><label>Amount:-</label><input id="ov-amt" type="text" required /></div>
+            <div class="form-row"><label>Work Order:-</label><input id="ov-wo" type="text" /></div>
+            <div class="form-row"><label>Remarks:-</label><input id="ov-remarks" type="text" /></div>
+            <div class="form-row"><label>Upload Bill:-</label><input id="ov-file" type="file" accept=".pdf,.jpg,.jpeg,.png" multiple /></div>
+            <div class="form-actions"><button type="submit" class="btn">Submit</button><button type="reset" class="btn-secondary">Reset</button></div>
+          </form>
+        </div>
+      </section>
+
+      <!-- PAYMENT REQUEST -->
+      <section id="dv-payment-form" class="page">
+        <div class="content-card">
+          <a class="btn-back" data-target="#dashboard">← Back</a>
+          <h2>Submit Payment Request</h2>
+          <form class="form" id="paymentForm" data-code="PR">
+            <div class="claim-stamp">Claim No: <span class="claim-text">—</span></div>
+            <input type="hidden" class="claim" id="pr-claim"/>
+            <div class="form-row"><label>Date:-</label><input id="pr-date" type="date" required /></div>
+            <div class="form-row"><label>Description:-</label><input id="pr-desc" type="text" required /></div>
+            <div class="form-row"><label>Amount:-</label><input id="pr-amount" type="text" required /></div>
+            <div class="form-row"><label>Work Order:-</label><input id="pr-wo" type="text" /></div>
+            <div class="form-row"><label>Remarks:-</label><input id="pr-remarks" type="text" required /></div>
+            <div class="form-actions"><button type="submit" class="btn">Submit</button><button type="reset" class="btn-secondary">Reset</button></div>
+          </form>
+        </div>
+      </section>
+
+      <!-- VIEW PAYMENT REQUEST -->
+      <section id="dv-view-pr" class="page">
+        <div class="content-card">
+          <a class="btn-back" data-target="#dashboard">← Back</a>
+          <h2>View Payment Request</h2>
+          <div class="table-wrap">
+            <table class="data" id="paymentTable">
+              <thead>
+                <tr><th style="width:50px;">SL</th><th style="width:120px;">Date</th><th>Claim No</th><th style="width:120px;">Amount</th><th>Department Head</th><th>Finance Head</th><th>Accountant</th></tr>
+              </thead>
+              <tbody id="paymentTbody"><tr class="empty"><td colspan="7">No payment requests yet.</td></tr></tbody>
+            </table>
+          </div>
+          <div class="actions" style="margin-top:10px"><button id="refreshStatusBtn" class="btn-secondary">Refresh Statuses</button><button id="seedDemoBtn" class="btn-secondary">Add Demo Rows</button></div>
+        </div>
+      </section>
+
+      <!-- APPROVAL PENDING -->
+      <section id="dv-approval" class="page">
+        <div class="content-card">
+          <a class="btn-back" data-target="#dashboard">← Back</a>
+          <h2>Approval Pending</h2>
+          <h3 style="margin-top:0">Payment Requests waiting for Dept Head</h3>
+          <div class="table-wrap" style="margin-bottom:16px;">
+            <table class="data">
+              <thead><tr><th style="width:50px;">SL</th><th style="width:120px;">Date</th><th>Claim No</th><th style="width:120px;">Amount</th><th>Action</th></tr></thead>
+              <tbody id="pendingPRTbody"><tr class="empty"><td colspan="5">Nothing pending.</td></tr></tbody>
+            </table>
+          </div>
+          <h3>Vouchers waiting for Dept Head</h3>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th style="width:50px;">SL</th><th style="width:120px;">Date</th><th>Claim No</th><th style="width:120px;">Amount</th><th>Action</th></tr></thead>
+              <tbody id="pendingVTbody"><tr class="empty"><td colspan="5">Nothing pending.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- DOWNLOAD LEDGER -->
+      <section id="dv-ledger" class="page">
+        <div class="content-card">
+          <a class="btn-back" data-target="#dashboard">← Back</a>
+          <h2>Download Ledger</h2>
+          <div class="ledger-actions"><button class="btn-secondary" onclick="window.print()">Print / Download</button></div>
+          <div class="ledger-wrap" id="ledgerArea">
+            <div class="ledger-top">
+              <div class="ledger-title"><input id="ledgerName" value="HANUMANTHA" style="font:inherit;font-weight:800;border:none;border-bottom:1px solid #111;outline:0;width:100%;max-width:360px"/></div>
+              <table class="ledger-total">
+                <tr><th>TOTAL</th><th>CREDIT</th><td id="lt-credit" class="number">0</td></tr>
+                <tr><td></td><th>DEBIT</th><td id="lt-debit" class="number">0</td></tr>
+                <tr><td></td><th>BALANCE</th><td id="lt-balance" class="number">0</td></tr>
+              </table>
+            </div>
+            <table class="ledger-box" id="ledgerTable">
+              <thead><tr><th style="width:60px;">SL NO.</th><th style="width:140px;">DATE</th><th>VOUCHER NO</th><th style="width:140px;">DEBIT</th><th style="width:140px;">CREDIT</th><th>REMARKS</th></tr></thead>
+              <tbody id="ledgerBody"></tbody>
+              <tfoot><tr><th colspan="3" style="text-align:right">TOTAL</th><th id="lb-debit" class="number">0</th><th id="lb-credit" class="number">0</th><th></th></tr></tfoot>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW VOUCHER -->
+      <section id="dv-view-voucher" class="page">
+        <div class="content-card">
+          <a class="btn-back" data-target="#dashboard">← Back</a>
+          <h2>View Voucher</h2>
+          <div class="table-wrap">
+            <table class="data" id="voucherTable">
+              <thead><tr><th style="width:50px;">SL</th><th style="width:120px;">Date</th><th>Claim No</th><th style="width:120px;">Amount</th><th>Accountant</th><th>Department Head</th><th>Finance Head</th></tr></thead>
+              <tbody id="voucherTbody"><tr class="empty"><td colspan="7">No vouchers yet.</td></tr></tbody>
+            </table>
+          </div>
+          <div class="actions" style="margin-top:10px"><button id="voucherRefreshBtn" class="btn-secondary">Refresh Statuses</button><button id="voucherSeedBtn" class="btn-secondary">Add Demo Rows</button></div>
+        </div>
+      </section>
+
+      <!-- WORKORDER UPDATE -->
+      <section id="dv-workorder" class="page">
+        <div class="content-card">
+          <a class="btn-back" data-target="#dashboard">← Back</a>
+          <h2>Workorder Update</h2>
+          <div class="wo-wrap" style="max-width:820px;margin:0 auto">
+            <form class="form" id="woForm">
+              <div class="form-row"><label>WO Number</label><input id="wo-number" placeholder="e.g., WO-00231" required/></div>
+              <div class="form-row"><label>Category</label><input id="wo-category" placeholder="Type category"/></div>
+              <div class="form-row"><label>Description</label><textarea id="wo-desc" placeholder="Short description..."></textarea></div>
+              <div class="form-row"><label>Type of Business</label><input id="wo-type" placeholder="Type of business"/></div>
+              <div class="form-row"><label>Customer</label><input id="wo-customer" placeholder="Customer name"/></div>
+              <div class="form-row"><label>Status</label><input id="wo-status" placeholder="Status"/></div>
+              <div class="form-actions" style="justify-content:flex-end">
+                <button class="btn btn-sm" type="submit">Save</button>
+                <button class="btn btn-outline btn-sm" type="button" id="wo-view">View</button>
+                <button class="btn btn-outline btn-sm" type="reset">Clear</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- Reports by type -->
+      <section id="rpt-purchase" class="page"><div class="content-card"><a class="btn-back" data-target="#dv-reports">← Back</a><h2>Purchase Vouchers</h2><div class="table-wrap"><table class="data"><thead><tr><th>Date</th><th>Claim No</th><th>Amount</th><th>Workorder</th><th>Files</th><th>Remarks</th></tr></thead><tbody id="rpt-purchase-body"><tr class="empty"><td colspan="6">No data.</td></tr></tbody></table></div></div></section>
+      <section id="rpt-travel" class="page"><div class="content-card"><a class="btn-back" data-target="#dv-reports">← Back</a><h2>Travel Vouchers</h2><div class="table-wrap"><table class="data"><thead><tr><th>Date</th><th>Claim No</th><th>Amount</th><th>Workorder</th><th>Files</th><th>Remarks</th></tr></thead><tbody id="rpt-travel-body"><tr class="empty"><td colspan="6">No data.</td></tr></tbody></table></div></div></section>
+      <section id="rpt-cash" class="page"><div class="content-card"><a class="btn-back" data-target="#dv-reports">← Back</a><h2>Cash Vouchers</h2><div class="table-wrap"><table class="data"><thead><tr><th>Date</th><th>Claim No</th><th>Amount</th><th>Workorder</th><th>Files</th><th>Remarks</th></tr></thead><tbody id="rpt-cash-body"><tr class="empty"><td colspan="6">No data.</td></tr></tbody></table></div></div></section>
+      <section id="rpt-others" class="page"><div class="content-card"><a class="btn-back" data-target="#dv-reports">← Back</a><h2>Other Vouchers</h2><div class="table-wrap"><table class="data"><thead><tr><th>Date</th><th>Claim No</th><th>Amount</th><th>Workorder</th><th>Files</th><th>Remarks</th></tr></thead><tbody id="rpt-others-body"><tr class="empty"><td colspan="6">No data.</td></tr></tbody></table></div></div></section>
+      <section id="rpt-wo" class="page">
+        <div class="content-card">
+          <a class="btn-back" data-target="#dv-reports">← Back</a>
+          <h2>Workorder wise</h2>
+          <div class="actions" style="align-items:center;margin-bottom:6px;">
+            <span class="muted" style="min-width:120px;">Select Workorder:</span>
+            <select id="woFilter" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;"></select>
+          </div>
+          <h3 id="woTitle" style="margin:6px 0 2px 0;">Workorder No: —</h3>
+          <div id="woRange" class="muted" style="margin-bottom:10px;">From — To —</div>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th style="width:120px;">Date</th><th>Description</th><th>Category</th><th>Type of Business</th><th>Customer</th><th>Status</th></tr></thead>
+              <tbody id="rpt-wo-body"><tr class="empty"><td colspan="6">No entries yet.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<script>
+  /* ===== Router + mobile rail hide ===== */
+  function setRailVisibilityForMobile(id){
+    if(window.innerWidth <= 900){
+      if(id==='#dashboard'){ document.body.classList.remove('rail-hidden'); }
+      else{ document.body.classList.add('rail-hidden'); }
+    }
+  }
+  function show(hash){
+    const id = hash || '#dashboard';
+    document.querySelectorAll('section.page').forEach(s=>s.classList.remove('show'));
+    (document.querySelector(id)||document.querySelector('#dashboard')).classList.add('show');
+    setRailVisibilityForMobile(id);
+    window.scrollTo({top:0, behavior:'instant'});
+    if(id==='#dv-view-pr'){ renderPaymentTable(); }
+    if(id==='#dv-approval'){ renderPendingPRTable(); renderPendingVTable(); }
+    if(id==='#dv-view-voucher'){ renderVoucherTable(); }
+    if(id==='#dv-ledger'){ if(!window._ledgerLoaded){ fillSampleLedger(); window._ledgerLoaded=true; } }
+    if(id.startsWith('#rpt-')){ renderReports(); if(id==='#rpt-wo'){ renderWOReport(); } }
+  }
+  document.addEventListener('click',(e)=>{
+    const t=e.target.closest('[data-target]');
+    if(t){
+      e.preventDefault();
+      const target=t.getAttribute('data-target');
+      show(target);
+      history.replaceState(null,'',target);
+    }
+  });
+  window.addEventListener('DOMContentLoaded',()=> { document.body.classList.remove('rail-hidden'); show(location.hash || '#dashboard'); });
+  window.addEventListener('hashchange',()=> show(location.hash));
+
+  /* ===== (Rest of your JS unchanged) ===== */
+
+  function readCookie(name){ return document.cookie.split('; ').find(r=>r.startsWith(name+'='))?.split('=')[1] || ''; }
+  function getUsername(){ return (window.APP_USERNAME || document.body.dataset.username || readCookie('username') || '').trim(); }
+  function firstLetterOfUser(){ const u=getUsername(); return u ? u[0].toUpperCase() : 'X'; }
+  function previewSeq(code){ const k='seq_'+code; const n=parseInt(localStorage.getItem(k)||'0',10); return n+1; }
+  function commitSeq(code){ const k='seq_'+code; const n=parseInt(localStorage.getItem(k)||'0',10)+1; localStorage.setItem(k,String(n)); return n; }
+  function formatClaim(code, seq){ const fl=firstLetterOfUser(); return code==='PR' ? `${fl}-PR-${seq}` : `${fl}-${code}V-${seq}`; }
+  function updateClaimPreview(formEl){
+    const code=formEl?.dataset?.code; if(!code) return;
+    const seq = previewSeq(code); const claim = formatClaim(code, seq);
+    formEl.querySelector('.claim')?.setAttribute('value', claim);
+    formEl.querySelectorAll('.claim-text,.claim-text-inline').forEach(el=> el.textContent = claim);
+  }
+
+  const travelTotals={fare:0,local:0,hotel:0,da:0,misc:0};
+  function parseAmount(str){ if(!str) return 0; const n=parseFloat((str+'').replace(/[^0-9.]/g,'')); return isNaN(n)?0:n; }
+  function updateSummaryUI(){
+    const fmt=v=>v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+    document.getElementById('sum-fare').textContent=fmt(travelTotals.fare);
+    document.getElementById('sum-local').textContent=fmt(travelTotals.local);
+    document.getElementById('sum-hotel').textContent=fmt(travelTotals.hotel);
+    document.getElementById('sum-da').textContent=fmt(travelTotals.da);
+    document.getElementById('sum-misc').textContent=fmt(travelTotals.misc);
+    document.getElementById('sum-total').textContent=fmt(travelTotals.fare+travelTotals.local+travelTotals.hotel+travelTotals.da+travelTotals.misc);
+  }
+  function clearTravelTotals(){ travelTotals.fare=travelTotals.local=travelTotals.hotel=travelTotals.da=travelTotals.misc=0; updateSummaryUI(); }
+  updateSummaryUI();
+
+  document.querySelectorAll('[data-exp]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      document.querySelectorAll('.exp-card').forEach(c=>c.classList.remove('active'));
+      const card=document.getElementById('card-'+btn.dataset.exp);
+      if(card){ card.classList.add('active'); updateClaimPreview(document.getElementById('travelForm')); }
+    });
+  });
+
+  document.querySelectorAll('[data-addentry]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const k=btn.getAttribute('data-addentry');
+      const m = k==='fare' ? parseAmount(document.getElementById('fare-amt').value)
+              : k==='local'? parseAmount(document.getElementById('local-amt').value)
+              : k==='hotel'? parseAmount(document.getElementById('hotel-amt').value)
+              : k==='da'   ? parseAmount(document.getElementById('da-amt').value)
+              : parseAmount(document.getElementById('misc-amt').value);
+      travelTotals[k]+=m; updateSummaryUI(); alert('Entry added. Summary updated.');
+    });
+  });
+
+  /* Payment Requests */
+  const PR_KEY='paymentRequests', TWO_DAYS=2*24*60*60*1000;
+  const loadPR=()=>{try{return JSON.parse(localStorage.getItem(PR_KEY)||'[]')}catch{return[]}};
+  const savePR=(a)=>localStorage.setItem(PR_KEY,JSON.stringify(a));
+  function addPaymentRequest({date, amount, claimNo}){
+    const arr=loadPR(); const now=Date.now();
+    arr.push({ id:'pr_'+now, date, amount, claimNo, createdAt:now,
+      stages:{dept:{status:'Pending',updatedAt:now},finance:{status:'Pending',updatedAt:null},accountant:{status:'Pending',updatedAt:null}},
+      currentStage:'dept' });
+    savePR(arr);
+  }
+  function approveStagePR(item, stage, auto=false){
+    item.stages[stage].status=auto?'Auto-approved':'Approved'; item.stages[stage].updatedAt=Date.now();
+    const order=['dept','finance','accountant'], idx=order.indexOf(stage);
+    if(idx<order.length-1){ const next=order[idx+1]; item.currentStage=next; if(item.stages[next].updatedAt==null) item.stages[next].updatedAt=Date.now(); }
+    else item.currentStage='done';
+  }
+  function applyAutoApprovalsPR(item){
+    const order=['dept','finance','accountant'];
+    for(const stg of order){
+      const st=item.stages[stg];
+      if(st.status==='Pending'){
+        const base=st.updatedAt??item.createdAt;
+        if(Date.now()-base>=TWO_DAYS){ approveStagePR(item, stg, true); continue; } else break;
+      }
+    }
+    if(item.stages.dept.status==='Pending') item.currentStage='dept';
+    else if(item.stages.finance.status==='Pending') item.currentStage='finance';
+    else if(item.stages.accountant.status==='Pending') item.currentStage='accountant';
+    else item.currentStage='done';
+    return item;
+  }
+  function manualApprovePR(id){
+    const arr=loadPR(); const it=arr.find(x=>x.id===id); if(!it) return;
+    applyAutoApprovalsPR(it);
+    if(it.currentStage==='done'){ savePR(arr); renderPaymentTable(); renderPendingPRTable(); return; }
+    approveStagePR(it, it.currentStage, false); savePR(arr); renderPaymentTable(); renderPendingPRTable();
+  }
+
+  const prForm=document.getElementById('paymentForm');
+  if(prForm){
+    updateClaimPreview(prForm);
+    prForm.addEventListener('submit',(e)=>{
+      e.preventDefault();
+      const seq=commitSeq('PR'); const claim=formatClaim('PR', seq);
+      prForm.querySelector('#pr-claim').value=claim; prForm.querySelector('.claim-text').textContent=claim;
+      addPaymentRequest({date:document.getElementById('pr-date').value, amount:document.getElementById('pr-amount').value, claimNo:claim});
+      alert(`Payment request submitted!\nClaim No: ${claim}`);
+    });
+    prForm.addEventListener('reset',()=> setTimeout(()=> updateClaimPreview(prForm),0));
+  }
+  function stageCellPR(item, stage){
+    const st=item.stages[stage], isActive=item.currentStage===stage, statusText=st.status;
+    let cls='s-pending'; if(statusText==='Approved') cls='s-approved'; else if(statusText==='Auto-approved') cls='s-auto';
+    const updated = st.updatedAt ? new Date(st.updatedAt).toLocaleString() : '—';
+    const btn = isActive ? ` <button class="btn-secondary" style="padding:4px 8px" onclick="manualApprovePR('${item.id}')">Approve</button>` : '';
+    return `<span class="${cls}">${statusText}</span>${btn}<span class="muted">Updated: ${updated}</span>`;
+  }
+  function renderPaymentTable(){
+    let arr=loadPR(); const tbody=document.getElementById('paymentTbody'); if(!tbody) return;
+    if(arr.length===0){ tbody.innerHTML='<tr class="empty"><td colspan="7">No payment requests yet.</td></tr>'; return; }
+    arr=arr.map(applyAutoApprovalsPR); savePR(arr); tbody.innerHTML='';
+    arr.forEach((item,i)=>{
+      const num=parseFloat((item.amount+'').replace(/[^0-9.]/g,''))||0;
+      const fmt=num.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${i+1}</td><td>${item.date||'-'}</td><td>${item.claimNo||'-'}</td><td>${fmt}</td>
+                    <td>${stageCellPR(item,'dept')}</td><td>${stageCellPR(item,'finance')}</td><td>${stageCellPR(item,'accountant')}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+  function renderPendingPRTable(){
+    const tbody=document.getElementById('pendingPRTbody'); if(!tbody) return;
+    let arr=loadPR().map(applyAutoApprovalsPR).filter(x=>x.currentStage==='dept' && x.stages.dept.status==='Pending');
+    if(arr.length===0){ tbody.innerHTML='<tr class="empty"><td colspan="5">Nothing pending.</td></tr>'; return; }
+    tbody.innerHTML='';
+    arr.forEach((item,i)=>{
+      const amt=parseFloat((item.amount+'').replace(/[^0-9.]/g,''))||0;
+      const fmt=amt.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${i+1}</td><td>${item.date||'-'}</td><td>${item.claimNo||'-'}</td><td>${fmt}</td>
+        <td><button class="btn-secondary" style="padding:4px 8px" onclick="manualApprovePR('${item.id}')">Approve</button></td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  /* Vouchers */
+  const V_KEY='vouchers';
+  const loadV=()=>{try{return JSON.parse(localStorage.getItem(V_KEY)||'[]')}catch{return[]}};
+  const saveV=(a)=>localStorage.setItem(V_KEY,JSON.stringify(a));
+  const sessionFileURLs={};
+
+  function addVoucher(v){
+    const arr=loadV(); const now=Date.now();
+    arr.push({
+      id:'v_'+now, createdAt:now, currentStage:'accountant',
+      stages:{accountant:{status:'Pending',updatedAt:now},dept:{status:'Pending',updatedAt:null},finance:{status:'Pending',updatedAt:null}},
+      ...v
+    });
+    saveV(arr);
+  }
+  function approveStageV(item, stage){
+    item.stages[stage].status='Approved'; item.stages[stage].updatedAt=Date.now();
+    const order=['accountant','dept','finance'], idx=order.indexOf(stage);
+    if(idx<order.length-1){ const next=order[idx+1]; item.currentStage=next; if(item.stages[next].updatedAt==null) item.stages[next].updatedAt=Date.now(); }
+    else item.currentStage='done';
+  }
+  function manualApproveVoucher(id){
+    const arr=loadV(); const it=arr.find(x=>x.id===id); if(!it) return;
+    if(it.currentStage!=='dept'){ alert('Only Department Head can approve at this stage.'); return; }
+    approveStageV(it,'dept'); saveV(arr); renderVoucherTable(); renderPendingVTable();
+  }
+  function stageCellVoucher(item, stage){
+    const st=item.stages[stage]; const isDeptStage = stage==='dept' && item.currentStage==='dept';
+    const statusText=st.status; let cls='s-pending'; if(statusText==='Approved') cls='s-approved';
+    const updated = st.updatedAt ? new Date(st.updatedAt).toLocaleString() : '—';
+    const btn = isDeptStage ? ` <button class="btn-secondary" style="padding:4px 8px" onclick="manualApproveVoucher('${item.id}')">Approve</button>` : '';
+    return `<span class="${cls}">${statusText}</span>${btn}<span class="muted">Updated: ${updated}</span>`;
+  }
+  function renderVoucherTable(){
+    const tbody=document.getElementById('voucherTbody'); if(!tbody) return;
+    let arr=loadV(); if(arr.length===0){ tbody.innerHTML='<tr class="empty"><td colspan="7">No vouchers yet.</td></tr>'; return; }
+    tbody.innerHTML='';
+    arr.forEach((item,i)=>{
+      const num=parseFloat((item.amount+'').replace(/[^0-9.]/g,''))||0;
+      const fmt=num.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${i+1}</td><td>${item.date||'-'}</td><td>${item.claimNo||'-'}</td><td>${fmt}</td>
+                    <td>${stageCellVoucher(item,'accountant')}</td>
+                    <td>${stageCellVoucher(item,'dept')}</td>
+                    <td>${stageCellVoucher(item,'finance')}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+  function renderPendingVTable(){
+    const tbody=document.getElementById('pendingVTbody'); if(!tbody) return;
+    let arr=loadV().filter(x=>x.currentStage==='dept' && x.stages.dept.status==='Pending');
+    if(arr.length===0){ tbody.innerHTML='<tr class="empty"><td colspan="5">Nothing pending.</td></tr>'; return; }
+    tbody.innerHTML='';
+    arr.forEach((item,i)=>{
+      const amt=parseFloat((item.amount+'').replace(/[^0-9.]/g,''))||0;
+      const fmt=amt.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${i+1}</td><td>${item.date||'-'}</td><td>${item.claimNo||'-'}</td><td>${fmt}</td>
+        <td><button class="btn-secondary" style="padding:4px 8px" onclick="manualApproveVoucher('${item.id}')">Approve</button></td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  /* Hook forms → vouchers */
+  function fileInfoFromInput(inputEl, key){
+    const out=[]; if(!inputEl || !inputEl.files) return out;
+    for(const f of inputEl.files){ const url=URL.createObjectURL(f); out.push({name:f.name, urlKey:key}); sessionFileURLs[key]=(sessionFileURLs[key]||[]); sessionFileURLs[key].push(url); }
+    return out;
+  }
+  function wireVoucherFormPurchase(){
+    const f=document.getElementById('purchaseForm'); if(!f) return; updateClaimPreview(f);
+    f.addEventListener('submit',(e)=>{
+      e.preventDefault();
+      const seq=commitSeq('P'); const claim=formatClaim('P',seq);
+      f.querySelector('.claim').value=claim; f.querySelector('.claim-text').textContent=claim;
+      const files=fileInfoFromInput(document.getElementById('pv-file'), claim+'-pv');
+      addVoucher({ type:'purchase',
+        date:document.getElementById('pv-date').value, amount:document.getElementById('pv-amt').value,
+        workorder:document.getElementById('pv-wo').value, remarks:document.getElementById('pv-remarks').value,
+        claimNo:claim, files });
+      alert(`Purchase voucher submitted!\nClaim No: ${claim}`);
+    });
+    f.addEventListener('reset',()=> setTimeout(()=> updateClaimPreview(f),0));
+  }
+  function wireVoucherFormTravel(){
+    const f=document.getElementById('travelForm'); if(!f) return; updateClaimPreview(f);
+    f.addEventListener('submit',(e)=>{
+      e.preventDefault();
+      const seq=commitSeq('T'); const claim=formatClaim('T',seq);
+      f.querySelector('.claim').value=claim; f.querySelector('.claim-text').textContent=claim;
+      const total=(travelTotals.fare+travelTotals.local+travelTotals.hotel+travelTotals.da+travelTotals.misc).toFixed(2);
+      const files=[...fileInfoFromInput(document.getElementById('fare-file'), claim+'-fare'),
+                   ...fileInfoFromInput(document.getElementById('hotel-file'), claim+'-hotel'),
+                   ...fileInfoFromInput(document.getElementById('misc-file'), claim+'-misc')];
+      addVoucher({ type:'travel',
+        date:document.getElementById('tv-date').value, amount:String(total),
+        workorder:document.getElementById('tv-wo').value, remarks:'', claimNo:claim, files });
+      alert(`Travel voucher submitted!\nClaim No: ${claim}`);
+    });
+    f.addEventListener('reset',()=> setTimeout(()=>{ updateClaimPreview(f); clearTravelTotals(); },0));
+  }
+  function wireVoucherFormOthers(){
+    const f=document.getElementById('othersForm'); if(!f) return; updateClaimPreview(f);
+    f.addEventListener('submit',(e)=>{
+      e.preventDefault();
+      const seq=commitSeq('O'); const claim=formatClaim('O',seq);
+      f.querySelector('.claim').value=claim; f.querySelector('.claim-text').textContent=claim;
+      const files=fileInfoFromInput(document.getElementById('ov-file'), claim+'-ov');
+      addVoucher({ type:'others',
+        date:document.getElementById('ov-date').value, amount:document.getElementById('ov-amt').value,
+        workorder:document.getElementById('ov-wo').value, remarks:document.getElementById('ov-remarks').value,
+        claimNo:claim, files });
+      alert(`Other voucher submitted!\nClaim No: ${claim}`);
+    });
+    f.addEventListener('reset',()=> setTimeout(()=> updateClaimPreview(f),0));
+  }
+  wireVoucherFormPurchase();
+  wireVoucherFormTravel();
+  wireVoucherFormOthers();
+
+  /* Cash Voucher (items + save) */
+  (function initCashForm(){
+    const f = document.getElementById('cashForm'); if(!f) return;
+    updateClaimPreview(f); f._items = [];
+    const dateEl = document.getElementById('cash-date');
+    const partEl = document.getElementById('cash-particulars');
+    const headEl = document.getElementById('cash-head');
+    const amtEl  = document.getElementById('cash-amount');
+    const tbody  = document.getElementById('cashItemsBody');
+    const totalEl= document.getElementById('cashTotal');
+    const hidden = document.getElementById('cashTotalInput');
+
+    (function sortHeadOptionsByLength(){
+      const all = Array.from(headEl.querySelectorAll('option'));
+      const placeholder = all.find(o => o.disabled || o.value==='');
+      const opts = all.filter(o => o !== placeholder);
+      opts.sort((a,b) => { const la=a.textContent.trim().length, lb=b.textContent.trim().length; return la!==lb? la-lb : a.textContent.localeCompare(b.textContent); });
+      headEl.innerHTML = ''; if (placeholder) headEl.appendChild(placeholder); opts.forEach(o => headEl.appendChild(o)); headEl.value='';
+    })();
+
+    function render(){
+      if(!f._items.length){
+        tbody.innerHTML = `<tr><td colspan="4" class="muted">No items added.</td></tr>`;
+      }else{
+        tbody.innerHTML = f._items.map(it => `
+          <tr>
+            <td>${it.date}</td><td>${it.part}</td><td>${it.head}</td><td class="right">${it.amount.toFixed(2)}</td>
+          </tr>`).join('');
+      }
+      const sum = f._items.reduce((s,i)=> s + i.amount, 0);
+      totalEl.textContent = sum.toFixed(2);
+      hidden.value = sum.toFixed(2);
+    }
+    tbody.addEventListener('beforeinput', e => e.preventDefault());
+    tbody.addEventListener('keydown', e => {
+      if (!['Tab','Shift','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)) e.preventDefault();
+    });
+
+    function addCurrentIfValid(){
+      const d=dateEl.value, part=(partEl.value||'').trim(), head=headEl.value||'', amt=parseFloat(amtEl.value||'0');
+      if(!d || !part || !head || !(amt>0)) return false;
+      f._items.push({ date:d, part, head, amount:amt }); render(); return true;
+    }
+    function addVoucherFromCash(){
+      const seq=commitSeq('C'); const claim=formatClaim('C', seq);
+      const total = parseFloat(hidden.value || '0') || 0;
+      addVoucher({ type:'cash', date: dateEl.value || '', amount: String(total), workorder:'', remarks:partEl.value||'', claimNo:claim, files:[] });
+      alert(`Cash voucher submitted!\nClaim No: ${claim}`);
+    }
+    render();
+    f.addEventListener('submit', (e)=>{
+      e.preventDefault();
+      if(f._items.length===0){ addCurrentIfValid(); }
+      render(); addVoucherFromCash(); f.reset(); f._items=[]; render();
+    });
+  })();
+
+  /* Reports */
+  function linkForFiles(files){
+    if(!files || files.length===0) return '';
+    return files.map((f,i)=>{
+      const urls=sessionFileURLs[f.urlKey]||[];
+      const u=urls[i]||''; return u? `<a href="${u}" target="_blank">${f.name}</a>` : f.name;
+    }).join(', ');
+  }
+  function renderReports(){
+    const rows=loadV();
+    const byType={purchase:[],travel:[],cash:[],others:[]};
+    rows.forEach(r=>{ if(byType[r.type]) byType[r.type].push(r); });
+    function fill(tid, arr){
+      const tb=document.getElementById(tid); if(!tb) return;
+      if(arr.length===0){ tb.innerHTML='<tr class="empty"><td colspan="6">No data.</td></tr>'; return; }
+      tb.innerHTML='';
+      arr.forEach(r=>{
+        const num=parseFloat((r.amount+'').replace(/[^0-9.]/g,''))||0;
+        const fmt=num.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${r.date||''}</td><td>${r.claimNo||''}</td><td>${fmt}</td><td>${r.workorder||''}</td><td>${linkForFiles(r.files)}</td><td>${r.remarks||''}</td>`;
+        tb.appendChild(tr);
+      });
+    }
+    fill('rpt-purchase-body', byType.purchase);
+    fill('rpt-travel-body', byType.travel);
+    fill('rpt-cash-body', byType.cash);
+    fill('rpt-others-body', byType.others);
+  }
+
+  /* Workorder */
+  const WO_KEY='workorders';
+  const loadWO=()=>{try{return JSON.parse(localStorage.getItem(WO_KEY)||'[]')}catch{return[]}};
+  const saveWO=(a)=>localStorage.setItem(WO_KEY,JSON.stringify(a));
+  const woForm=document.getElementById('woForm');
+  woForm?.addEventListener('submit',(e)=>{
+    e.preventDefault();
+    const data={ id:'wo_'+Date.now(), wo:document.getElementById('wo-number').value, category:document.getElementById('wo-category').value, desc:document.getElementById('wo-desc').value, type:document.getElementById('wo-type').value, customer:document.getElementById('wo-customer').value, status:document.getElementById('wo-status').value };
+    const arr=loadWO(); arr.push(data); saveWO(arr); alert('Workorder saved.');
+  });
+  document.getElementById('wo-view')?.addEventListener('click',()=>{ window._woSelected = document.getElementById('wo-number').value || window._woSelected; show('#rpt-wo'); });
+  function renderWOReport(){
+    const arr=loadWO(); const filterEl=document.getElementById('woFilter'); const tb=document.getElementById('rpt-wo-body'); const titleEl=document.getElementById('woTitle'); const rangeEl=document.getElementById('woRange');
+    if(!arr.length){ filterEl.innerHTML=''; titleEl.textContent='Workorder No: —'; rangeEl.textContent='From — To —'; tb.innerHTML='<tr class="empty"><td colspan="6">No entries yet.</td></tr>'; return; }
+    const groups={}; for(const r of arr){ const key=r.wo||'(blank)'; (groups[key]||(groups[key]=[])).push(r); }
+    const woList=Object.keys(groups).sort(); const selected = (window._woSelected && groups[window._woSelected]) ? window._woSelected : woList[0]; window._woSelected = selected;
+    filterEl.innerHTML = woList.map(wo=>`<option value="${wo}" ${wo===selected?'selected':''}>${wo}</option>`).join('');
+    filterEl.onchange = () => { window._woSelected = filterEl.value; renderWOReport(); };
+    const rows = (groups[selected]||[]).slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')); titleEl.textContent = 'Workorder No: ' + (selected||'—');
+    if(rows.length){ const dates = rows.map(r=>r.date).filter(Boolean).sort(); rangeEl.textContent = `From ${dates[0]||'—'}  To ${dates[dates.length-1]||'—'}`; } else { rangeEl.textContent = 'From — To —'; }
+    if(!rows.length){ tb.innerHTML='<tr class="empty"><td colspan="6">No entries yet.</td></tr>'; return; }
+    tb.innerHTML=''; rows.forEach(r=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${r.date||''}</td><td>${r.desc||''}</td><td>${r.category||''}</td><td>${r.type||''}</td><td>${r.customer||''}</td><td>${r.status||''}</td>`; tb.appendChild(tr); });
+  }
+
+  /* Ledger sample */
+  const ledgerBody=document.getElementById('ledgerBody');
+  function fmtInt(n){ const num=parseInt((n||0),10); return isNaN(num)?'0':num.toLocaleString(); }
+  function renderLedgerRows(rows){
+    ledgerBody.innerHTML=''; const max=10; let debitSum=0, creditSum=0;
+    for(let i=0;i<max;i++){
+      const r=rows[i]||{date:'',voucher:'',debit:'',credit:'',remarks:''};
+      const d=parseInt(r.debit||0,10)||0; const c=parseInt(r.credit||0,10)||0; debitSum+=d; creditSum+=c;
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${i+1}</td><td>${r.date||''}</td><td>${r.voucher||''}</td><td class="number">${r.debit?fmtInt(r.debit):''}</td><td class="number">${r.credit?fmtInt(r.credit):''}</td><td>${r.remarks||''}</td>`;
+      ledgerBody.appendChild(tr);
+    }
+    document.getElementById('lb-debit').textContent=fmtInt(debitSum);
+    document.getElementById('lb-credit').textContent=fmtInt(creditSum);
+    document.getElementById('lt-debit').textContent=fmtInt(debitSum);
+    document.getElementById('lt-credit').textContent=fmtInt(creditSum);
+    document.getElementById('lt-balance').textContent=fmtInt(creditSum - debitSum);
+  }
+  function fillSampleLedger(){
+    const rows=[
+      {date:'30-06-2025', voucher:'OPENING BALANCE', debit:103941, credit:'', remarks:'TILL DATE C/F'},
+      {date:'16-08-2025', voucher:'H-PV-001', debit:1500, credit:'', remarks:''},
+      {date:'18-08-2025', voucher:'H-PR-008', debit:'', credit:5000, remarks:''},
+    ];
+    renderLedgerRows(rows);
+  }
+
+  document.querySelectorAll('form[data-code]').forEach(updateClaimPreview);
+  if(location.hash.startsWith('#rpt-')){ renderReports(); if(location.hash==='#rpt-wo'){ renderWOReport(); } }
+</script>
+</body>
+</html>
