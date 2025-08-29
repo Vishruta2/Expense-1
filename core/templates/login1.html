@@ -19,12 +19,13 @@
       margin: 0;
     }
 
-    /* overlay to lightly fade the image (less opacity) */
+    /* overlay to fade the image */
     body::before {
       content: "";
       position: absolute;
-      inset: 0;
-      background: rgba(255, 255, 255, 0.25); /* lighter fade */
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(255, 255, 255, 0.6); /* white overlay, 0.6 = fade strength */
       z-index: 0;
     }
 
@@ -83,9 +84,11 @@
   <!-- Serialize Django messages to JSON -->
   <script id="messages-json" type="application/json">
     [
-      {% for message in messages %}
-        "{{ message|escapejs }}"{% if not forloop.last %},{% endif %}
-      {% endfor %}
+      {% if messages %}
+        {% for message in messages %}
+          "{{ message|escapejs }}"{% if not forloop.last %},{% endif %}
+        {% endfor %}
+      {% endif %}
     ]
   </script>
   <script>

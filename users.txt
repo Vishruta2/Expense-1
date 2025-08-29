@@ -1,2 +1,7 @@
-user1, pass1
-user2, pass2
+# EMPLOYEES (role omitted => EMPLOYEE)
+emp1, pass1
+emp2, pass2
+
+# ACCOUNTANTS
+acc1, pass1, ACCOUNTANT
+acc2, pass2, ACCOUNTANT

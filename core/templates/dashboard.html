@@ -4,614 +4,1017 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Employee Dashboard</title>
-  {% load static %}
   <style>
     :root{
       --primary:#4CAF50;
       --primary-hover:#45a049;
-      --pastel-dark:#81c784; /* dark pastel green */
-      --card-shadow:0 8px 24px rgba(0,0,0,0.12);
+      --pastel-dark:#81c784;
+      --card-shadow:0 10px 26px rgba(0,0,0,.08);
+      --muted:#6b7280;
+      --text:#0f172a;
+      --ring:rgba(76,175,80,.25);
     }
-    body{
-      margin:0;
-      font-family:Arial, sans-serif;
-      background:var(--pastel-dark);
-      min-height:100vh;
-      display:flex;
-      flex-direction:column;
-    }
-    .logo-header{
-      background:#000;
-      padding:10px 18px;
-      display:flex;
-      align-items:center;
-    }
+    *{box-sizing:border-box}
+    body{ margin:0; font-family:system-ui,Arial,sans-serif; background:var(--pastel-dark); min-height:100vh; color:var(--text); }
+    .logo-header{ background:#000; padding:10px 18px; display:flex; align-items:center; }
     .logo{ height:35px; width:auto; }
 
+    /* Container & layout (keep your left menu + right content) */
     .container{
-      background:#fff;
-      margin:30px;
-      border-radius:14px;
-      box-shadow:var(--card-shadow);
-      padding:20px;
-      display:grid;
-      grid-template-columns: 160px 1fr;
-      gap:20px;
-      position: relative;
+      background:#fff; margin:30px; border-radius:16px; box-shadow:var(--card-shadow);
+      padding:22px; display:grid; grid-template-columns:220px 1fr; gap:24px;
     }
-    .header { grid-column: 1 / -1; text-align:center; font-size:24px; margin:0; color:#111; }
+    .header{ grid-column:1 / -1; text-align:center; font-size:28px; margin:4px 0 10px; color:#111; letter-spacing:.2px; }
 
-    /* Left menu (solid green, no gaps) */
-    .menu{ display:flex; flex-direction:column; border-radius:8px; overflow:hidden; }
+    /* Left menu */
+    .menu{ display:flex; flex-direction:column; border-radius:12px; overflow:hidden; background:#66bb6a; padding:10px; }
     .main-btn{
-      width:100%; text-align:left; padding:14px 8px;
-      font-size:14px; border:none; background:var(--primary); color:#fff;
-      cursor:pointer; transition:.2s; border-bottom:1px solid #3e9141;
+      width:100%; text-align:left; padding:13px 12px; font-size:14px; border:none;
+      background:#43a047; color:#fff; cursor:pointer; transition:.18s; border-bottom:1px solid rgba(0,0,0,.12); border-radius:10px; margin-bottom:10px; font-weight:700;
     }
-    .main-btn:last-child{ border-bottom:none; }
-    .main-btn:hover,.main-btn:focus{ background:var(--primary-hover); outline:none; }
+    .main-btn:hover,.main-btn:focus{ background:#2e7d32; outline:none; transform:translateY(-1px); }
+    .main-btn:last-child{ border-bottom:none; margin-bottom:0; }
 
-    /* Right content */
-    .content{
-      background:#fafafa; border:1px solid #eee; border-radius:10px;
-      box-shadow:var(--card-shadow); padding:16px; min-height:260px;
-    }
+    /* Right content card */
+    .content{ min-height:64vh; }
     .page{ display:none; }
-    .page.active{ display:block; animation:fade .15s ease-out; }
-    @keyframes fade{ from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:none;} }
+    .page.active{ display:block; }
+    .content-card{background:#fff;border:1px solid #e9eef4;border-radius:16px;box-shadow:var(--card-shadow);padding:20px;}
 
-    .page h2{ margin:0 0 12px 0; font-size:18px; color:#222; }
     .actions{ display:flex; flex-wrap:wrap; gap:10px; }
-
-    /* Sub-buttons: white -> dark pastel green on hover */
-    .actions .action-btn{
-      padding:10px 12px;
-      border-radius:8px;
-      border:1px solid var(--primary);
-      background:#fff;
-      color:var(--primary);
-      cursor:pointer;
-      font-size:13px;
-      transition:all .2s;
+    .action-btn{
+      padding:10px 12px; border-radius:8px; border:1px solid var(--primary);
+      background:#fff; color:#2e7d32; cursor:pointer; font-size:13px; transition:.18s; font-weight:600;
     }
-    .actions .action-btn:hover,
-    .actions .action-btn:focus{
-      background:var(--pastel-dark);
-      color:#fff;
-      border-color:var(--pastel-dark);
-      outline:none;
-    }
+    .action-btn:hover{ background:#e8f5e9; }
 
-    .back{ display:inline-block; margin-bottom:10px; font-size:12px; color:#0b57d0; text-decoration:none; cursor:pointer; }
+    .btn-primary,
+    .btn{ display:inline-flex; justify-content:center; align-items:center;
+      background:var(--primary); color:#fff; border:none; border-radius:12px;
+      padding:12px 14px; font-weight:700; cursor:pointer; transition:.18s; }
+    .btn-primary:hover,.btn:hover{ background:var(--primary-hover); transform:translateY(-1px) }
+    .btn-secondary{ background:#e9ecef; color:#111; border:1px solid #d0d7de; padding:10px 14px; border-radius:8px; cursor:pointer; font-size:14px; }
+
+    .back{ display:inline-flex; gap:8px; align-items:center; padding:8px 12px; border-radius:999px;
+      border:1px solid #c8e6c9; background:#e8f5e9; color:#256029; font-weight:700; text-decoration:none; margin-bottom:10px; cursor:pointer; width:auto;}
 
     /* Forms */
-    .form{ background:#fff; border:1px solid #e9e9e9; border-radius:10px; padding:16px; }
+    .form{ background:#fff; border:1px solid #e9e9e9; border-radius:10px; padding:16px; position:relative; }
     .form-row{ margin-bottom:12px; }
     .form-row label{ display:block; font-size:14px; color:#333; margin-bottom:6px; }
     .form-row input[type="text"],
-    .form-row input[type="number"],
     .form-row input[type="date"],
+    .form-row input[type="datetime-local"],
     .form-row input[type="file"],
-    .form-row textarea{
-      width:100%; padding:10px; border:1px solid #dcdcdc; border-radius:8px; font-size:14px; background:#fff; box-sizing:border-box;
+    .form-row textarea,
+    .form-row select{
+      width:100%; padding:10px; border:1px solid #888; border-radius:8px; font-size:14px; background:#fff;
     }
     .form-row textarea{ min-height:90px; resize:vertical; }
     .form-row input[readonly]{ background:#f7f7f7; color:#555; }
+    .form-actions{ display:flex; gap:10px; margin-top:8px; flex-wrap:wrap; }
 
-    .form-actions{ display:flex; gap:10px; margin-top:8px; }
-    .btn-primary{ background:var(--primary); color:#fff; border:none; padding:10px 14px; border-radius:8px; cursor:pointer; font-size:14px; }
-    .btn-primary:hover{ background:var(--primary-hover); }
-    .btn-secondary{ background:#e9ecef; color:#111; border:1px solid #d0d7de; padding:10px 14px; border-radius:8px; cursor:pointer; font-size:14px; }
+    /* Claim badge */
+    .claim-stamp{
+      position:absolute; top:10px; right:12px;
+      background:#f1f8e9; border:1px solid #cfe3c4; color:#1b5e20;
+      padding:6px 10px; border-radius:8px; font-weight:700; font-size:13px;
+    }
 
-    /* Table styles (used by View Payment Request & View Voucher) */
-    .table-wrap{
-      background:#fff; border:1px solid #e9e9e9; border-radius:10px; padding:12px;
-      overflow:auto;
-    }
-    table{ width:100%; border-collapse:collapse; min-width:900px; }
-    thead th{
-      text-align:left; background:#f5f5f5; font-weight:bold; padding:10px; font-size:13px; border-bottom:1px solid #e3e3e3;
-      position:sticky; top:0;
-    }
-    tbody td{ padding:10px; font-size:13px; border-bottom:1px solid #f0f0f0; }
-    .chip{
-      display:inline-block; padding:3px 8px; border-radius:999px; font-size:12px; border:1px solid #dcdcdc; background:#fff;
-    }
-    .chip.approved{ border-color:#2e7d32; color:#2e7d32; }
-    .chip.auto{ border-color:#6a5acd; color:#6a5acd; }
-    .chip.pending{ border-color:#d39e00; color:#a66f00; }
-    .chip.blocked{ border-color:#9e9e9e; color:#616161; }
-    .chip.done{ border-color:#1976d2; color:#1976d2; }
-    .approve-btn{
-      padding:6px 10px; border-radius:8px; border:1px solid var(--primary); background:#fff; color:var(--primary); cursor:pointer; font-size:12px;
-    }
-    .approve-btn:hover{ background:var(--pastel-dark); color:#fff; border-color:var(--pastel-dark); }
+    /* Travel voucher (unchanged layout) */
+    .travel-title{ text-align:center; font-weight:700; margin-bottom:10px; }
+    .travel-table{ width:100%; border-collapse:collapse; margin-bottom:12px; table-layout:fixed; }
+    .travel-table th, .travel-table td{ border:1px solid #444; padding:6px; vertical-align:middle; }
+    .travel-table input{ width:95%; padding:8px; border:1px solid #888; border-radius:6px; background:#fff; font-size:14px; }
 
-    @media (max-width: 700px){
-      .container{ grid-template-columns:1fr; }
-      .menu{ flex-direction:row; }
-      .main-btn{ flex:1; border-bottom:none; border-right:1px solid #3e9141; padding:10px; }
-      .main-btn:last-child{ border-right:none; }
+    .exp-card{ background:#fff; border:1px solid #e3e3e3; border-radius:10px; padding:12px; margin:10px 0; display:none; position:relative; }
+    .exp-card.active{ display:block; }
+    .exp-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; }
+    .exp-grid .cell{ display:flex; flex-direction:column; }
+
+    /* Summary */
+    .summary-wrap{ margin-top:12px; border:1px solid #cfd8dc; border-radius:10px; background:#fff; overflow:hidden; }
+    .summary-head{ background:#f1f8e9; padding:8px 10px; font-weight:800; border-bottom:1px solid #cfd8dc; }
+    .sum-table{ width:100%; border-collapse:collapse; }
+    .sum-table th, .sum-table td{ border:1px solid #e0e0e0; padding:8px; }
+    .sum-amount{ text-align:right; }
+    .summary-total{ font-size:18px; font-weight:bold; background:#f7f7f7; }
+
+    /* Tables like Dept dashboard */
+    .table-wrap{ overflow:auto; background:#fff; border:1px solid #e5e7eb; border-radius:10px; margin-bottom:12px; }
+    table.data{ width:100%; border-collapse:collapse; font-size:14px; }
+    table.data th,table.data td{ border:1px solid #e5e7eb; padding:8px; text-align:left; }
+    .muted{ color:#6b7280; font-size:12px; display:block; margin-top:4px }
+
+    .s-pending{color:#9a6700}
+    .s-approved{color:#116329}
+    .s-auto{color:#1b4b91}
+    .s-rejected{color:#a40e26}
+
+    /* Ledger (Dept style) */
+    #dv-ledger h2{text-align:center}
+    .ledger-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .ledger-title{font-size:28px;letter-spacing:1px;font-weight:800}
+    .ledger-total{border:1px solid #111;border-collapse:collapse}
+    .ledger-total th,.ledger-total td{border:1px solid #111;padding:6px 10px}
+    .ledger-box{border:1px solid #111;border-collapse:collapse;width:100%}
+    .ledger-box th,.ledger-box td{border:1px solid #111;padding:8px}
+    .ledger-actions{display:flex;gap:8px;margin:10px 0}
+    .ledger-actions .btn-secondary{padding:8px 10px}
+    .ledger-wrap{background:#fff;border:1px solid #111;padding:14px;border-radius:8px}
+    .number{text-align:right}
+    .print-note{color:#6b7280;font-size:12px;margin-top:8px}
+
+    /* Cash voucher mini table (Dept style) */
+    .small-table{width:100%;border-collapse:collapse}
+    .small-table th,.small-table td{padding:8px;border-bottom:1px solid #eee;font-size:13px}
+    .right{text-align:right}
+    #cashForm .form-row input,
+    #cashForm .form-row select,
+    #cashForm .form-row textarea{width:380px;max-width:100%;font-size:14px;padding:8px 10px}
+
+    @media (max-width: 900px){
+      .container{ grid-template-columns:1fr; margin:16px; gap:14px; }
+      .menu{
+        display:flex; flex-wrap:wrap; gap:8px;
+        background:#66bb6a; padding:10px; border-radius:12px;
+      }
+      .main-btn{flex:1 1 calc(50% - 8px); text-align:center; margin:0}
+      .table-wrap{ overflow-x:auto; -webkit-overflow-scrolling:touch }
+      table.data th, table.data td{ white-space:nowrap; }
+    }
+    @media (max-width:480px){
+      .main-btn{flex:1 1 100%}
     }
   </style>
 </head>
 <body data-username="">
   <div class="logo-header">
-    <img class="logo" src="{% static 'core/images/logo.png' %}" alt="Company Logo">
+    <img class="logo" src="logo.png" alt="Company Logo">
   </div>
 
   <div class="container">
     <h1 class="header">Employee Dashboard</h1>
 
-    <!-- Left menu -->
+    <!-- Left menu (names unchanged) -->
     <nav class="menu" aria-label="Main actions">
       <button class="main-btn" data-target="page-upload">Upload Voucher</button>
-      <button class="main-btn" data-target="page-payment">Payment Request</button>
-      <button class="main-btn" data-target="page-ledger">Download Ledger</button>
+      <button class="main-btn" data-target="page-payment-form">Submit Payment Request</button>
+      <button class="main-btn" data-target="page-payment-view">View Payment Request</button>
+      <button class="main-btn" data-target="dv-ledger">Download Ledger</button>
       <button class="main-btn" data-target="page-view">View Voucher</button>
     </nav>
 
     <!-- Right content -->
     <section class="content">
+
       <div id="page-home" class="page active">
-      
+        <div class="content-card">
+        </div>
       </div>
 
-      <!-- Upload Voucher: sub-buttons -->
+      <!-- Upload Voucher -->
       <div id="page-upload" class="page">
-        <span class="back" data-target="page-home">← Back</span>
-        <h2>Upload Voucher</h2>
-        <div class="actions">
-          <button class="action-btn" data-target="page-purchase-form">Purchase</button>
-          <button class="action-btn" data-target="page-travel-form">Travel Voucher</button>
-          <button class="action-btn" data-target="page-cash-form">Cash Voucher</button>
-          <button class="action-btn" data-target="page-others-form">Others</button>
+        <div class="content-card">
+          <span class="back" data-target="page-home">← Back</span>
+          <h2>Upload Voucher</h2>
+          <div class="actions">
+            <button class="action-btn" data-target="page-purchase-form">Purchase</button>
+            <button class="action-btn" data-target="page-travel-form">Travel Voucher</button>
+            <button class="action-btn" data-target="page-cash-form">Cash Voucher</button>
+            <button class="action-btn" data-target="page-others-form">Others</button>
+          </div>
         </div>
       </div>
 
       <!-- Purchase Voucher -->
       <div id="page-purchase-form" class="page">
-        <span class="back" data-target="page-upload">← Back</span>
-        <h2>Purchase Voucher</h2>
-        <form class="form" id="purchaseForm" data-code="P">
-          <div class="form-row"><label>Date:-</label><input type="date" required /></div>
-          <div class="form-row"><label>Supplier Name:-</label><input type="text" required /></div>
-          <div class="form-row"><label>Bill Date:-</label><input type="date" required /></div>
-          <div class="form-row"><label>Amount:-</label><input type="number" step="0.01" min="0" required /></div>
-          <div class="form-row"><label>Work Order:-</label><input type="text" /></div>
-          <div class="form-row"><label>Remarks:-</label><textarea></textarea></div>
-          <div class="form-row"><label>Upload Bill:-</label><input type="file" accept=".pdf,.jpg,.jpeg,.png" required /></div>
-          <div class="form-row"><label>Voucher Number:-</label><input class="vno" type="text" placeholder="e.g., 1023" required /></div>
-          <div class="form-row"><label>Claim No:-</label><input class="claim" type="text" readonly /></div>
-          <div class="form-actions"><button type="submit" class="btn-primary">Submit</button><button type="reset" class="btn-secondary">Reset</button></div>
-        </form>
+        <div class="content-card">
+          <span class="back" data-target="page-upload">← Back</span>
+          <h2>Purchase Voucher</h2>
+          <form class="form" id="purchaseForm" data-code="P">
+            <div class="claim-stamp">Claim No: <span class="claim-text">—</span></div>
+            <input type="hidden" class="claim" />
+            <div class="form-row"><label>Date:-</label><input id="pv-date" type="date" required /></div>
+            <div class="form-row"><label>Supplier Name:-</label><input id="pv-supplier" type="text" required /></div>
+            <div class="form-row"><label>Invoice No:-</label><input id="pv-invoice" type="text" /></div>
+            <div class="form-row"><label>Bill Date:-</label><input id="pv-billdate" type="date" required /></div>
+            <div class="form-row"><label>Amount:-</label><input id="pv-amt" type="text" required /></div>
+            <div class="form-row"><label>Work Order:-</label><input id="pv-wo" type="text" /></div>
+            <div class="form-row"><label>Remarks:-</label><input id="pv-remarks" type="text" /></div>
+            <div class="form-row"><label>Upload Bill:-</label><input id="pv-file" type="file" accept=".pdf,.jpg,.jpeg,.png" multiple /></div>
+            <div class="form-actions"><button type="submit" class="btn">Submit</button><button type="reset" class="btn-secondary">Reset</button></div>
+          </form>
+        </div>
       </div>
 
       <!-- Travel Voucher -->
       <div id="page-travel-form" class="page">
-        <span class="back" data-target="page-upload">← Back</span>
-        <h2>Travel Voucher</h2>
-        <form class="form" id="travelForm" data-code="T">
-          <div class="form-row"><label>Date:-</label><input type="date" required /></div>
-          <div class="form-row"><label>Supplier Name:-</label><input type="text" required /></div>
-          <div class="form-row"><label>Bill Date:-</label><input type="date" required /></div>
-          <div class="form-row"><label>Amount:-</label><input type="number" step="0.01" min="0" required /></div>
-          <div class="form-row"><label>Work Order:-</label><input type="text" /></div>
-          <div class="form-row"><label>Remarks:-</label><textarea></textarea></div>
-          <div class="form-row"><label>Upload Bill:-</label><input type="file" accept=".pdf,.jpg,.jpeg,.png" required /></div>
-          <div class="form-row"><label>Voucher Number:-</label><input class="vno" type="text" placeholder="e.g., 55" required /></div>
-          <div class="form-row"><label>Claim No:-</label><input class="claim" type="text" readonly /></div>
-          <div class="form-actions"><button type="submit" class="btn-primary">Submit</button><button type="reset" class="btn-secondary">Reset</button></div>
-        </form>
+        <div class="content-card">
+          <span class="back" data-target="page-upload">← Back</span>
+          <h2>Travel Voucher</h2>
+          <form class="form" id="travelForm" data-code="T">
+            <div class="claim-stamp">Claim No: <span class="claim-text">—</span></div>
+            <input type="hidden" class="claim" />
+            <div class="travel-title">TRAVELING ALLOWANCE</div>
+
+            <table class="travel-table">
+              <tr>
+                <td><b>Project Name / W.O # :</b><input id="tv-wo" type="text" required></td>
+                <td><b>Date :</b><input id="tv-date" type="date" required></td>
+              </tr>
+              <tr>
+                <td><b>Customer :</b><input id="tv-customer" type="text" required></td>
+                <td><b>Name :</b><input id="tv-name" type="text" required></td>
+              </tr>
+              <tr>
+                <td><b>Designation :</b><input id="tv-desig" type="text" required></td>
+                <td><b>Place of Visit :</b><input id="tv-place" type="text" required></td>
+              </tr>
+              <tr>
+                <td><b>Purpose of Journey :</b><input id="tv-purpose" type="text" required></td>
+                <td><b>Visit Authorised By :</b><input id="tv-auth" type="text"></td>
+              </tr>
+              <tr>
+                <td><b>From (Date) :</b><input id="tv-from" type="date" required></td>
+                <td><b>To (Date) :</b><input id="tv-to" type="date" required></td>
+              </tr>
+            </table>
+
+            <div class="form-actions" style="margin-top:12px;">
+              <button type="submit" class="btn">Submit Travel Voucher</button>
+              <button type="reset" class="btn-secondary">Reset All</button>
+            </div>
+
+            <div class="actions" style="margin:8px 0 2px;">
+              <button class="action-btn" type="button" data-exp="fare">Travel Fare</button>
+              <button class="action-btn" type="button" data-exp="local">Local Travel</button>
+              <button class="action-btn" type="button" data-exp="hotel">Hotel Accommodation</button>
+              <button class="action-btn" type="button" data-exp="da">Daily & Food Allowance</button>
+              <button class="action-btn" type="button" data-exp="misc">Miscellaneous Expenses</button>
+            </div>
+
+            <!-- (A) Travel Fare -->
+            <div class="exp-card" id="card-fare">
+              <div class="claim-stamp">Claim No: <span class="claim-text-inline">—</span></div>
+              <h3>(A) Travel Fare</h3>
+              <div class="exp-grid">
+                <div class="cell"><label>Sl No</label><input type="text" id="fare-sl"></div>
+                <div class="cell"><label>From Place</label><input type="text" id="fare-from"></div>
+                <div class="cell"><label>To Place</label><input type="text" id="fare-to"></div>
+                <div class="cell"><label>Date & Time of Departure</label><input type="datetime-local" id="fare-dep"></div>
+                <div class="cell"><label>Date & Time of Arrival</label><input type="datetime-local" id="fare-arr"></div>
+                <div class="cell"><label>Mode of Transport</label><input type="text" id="fare-mode"></div>
+                <div class="cell"><label>Amount</label><input type="text" id="fare-amt"></div>
+                <div class="cell"><label>Ticket No</label><input type="text" id="fare-ticket"></div>
+                <div class="cell"><label>Ticket File</label><input type="file" id="fare-file" accept=".pdf,.jpg,.jpeg,.png" multiple></div>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn-secondary" data-addentry="fare">Add Entry</button>
+                <button type="button" class="btn" data-submit-section="fare">Submit</button>
+                <button type="button" class="btn-secondary" data-reset-section="fare">Reset</button>
+              </div>
+            </div>
+
+            <!-- (B) Local Travel -->
+            <div class="exp-card" id="card-local">
+              <div class="claim-stamp">Claim No: <span class="claim-text-inline">—</span></div>
+              <h3>(B) Local Travel</h3>
+              <div class="exp-grid">
+                <div class="cell"><label>Date</label><input type="date" id="local-date"></div>
+                <div class="cell"><label>From</label><input type="text" id="local-from"></div>
+                <div class="cell"><label>To</label><input type="text" id="local-to"></div>
+                <div class="cell"><label>Mode</label><input type="text" id="local-mode"></div>
+                <div class="cell"><label>Amount</label><input type="text" id="local-amt"></div>
+                <div class="cell"><label>Remarks</label><input type="text" id="local-remarks"></div>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn-secondary" data-addentry="local">Add Entry</button>
+                <button type="button" class="btn" data-submit-section="local">Submit</button>
+                <button type="button" class="btn-secondary" data-reset-section="local">Reset</button>
+              </div>
+            </div>
+
+            <!-- (C) Hotel Accommodation -->
+            <div class="exp-card" id="card-hotel">
+              <div class="claim-stamp">Claim No: <span class="claim-text-inline">—</span></div>
+              <h3>(C) Hotel Accommodation</h3>
+              <div class="exp-grid">
+                <div class="cell"><label>From Date</label><input type="date" id="hotel-from"></div>
+                <div class="cell"><label>To Date</label><input type="date" id="hotel-to"></div>
+                <div class="cell"><label>Hotel Name & Place</label><input type="text" id="hotel-name"></div>
+                <div class="cell"><label>Amount</label><input type="text" id="hotel-amt"></div>
+                <div class="cell"><label>Bill No</label><input type="text" id="hotel-bill"></div>
+                <div class="cell"><label>Bill File</label><input type="file" id="hotel-file" accept=".pdf,.jpg,.jpeg,.png" multiple></div>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn-secondary" data-addentry="hotel">Add Entry</button>
+                <button type="button" class="btn" data-submit-section="hotel">Submit</button>
+                <button type="button" class="btn-secondary" data-reset-section="hotel">Reset</button>
+              </div>
+            </div>
+
+            <!-- (D) Daily & Food Allowance -->
+            <div class="exp-card" id="card-da">
+              <div class="claim-stamp">Claim No: <span class="claim-text-inline">—</span></div>
+              <h3>(D) Daily Allowance & Food Allowance</h3>
+              <div class="exp-grid">
+                <div class="cell"><label>From Date & Time</label><input type="datetime-local" id="da-from"></div>
+                <div class="cell"><label>To Date & Time</label><input type="datetime-local" id="da-to"></div>
+                <div class="cell"><label>No of Days</label><input type="text" id="da-days"></div>
+                <div class="cell"><label>DA/FA</label><input type="text" id="da-type"></div>
+                <div class="cell"><label>Amount</label><input type="text" id="da-amt"></div>
+                <div class="cell"><label>Remarks</label><input type="text" id="da-remarks"></div>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn-secondary" data-addentry="da">Add Entry</button>
+                <button type="button" class="btn" data-submit-section="da">Submit</button>
+                <button type="button" class="btn-secondary" data-reset-section="da">Reset</button>
+              </div>
+            </div>
+
+            <!-- (E) Miscellaneous Expenses -->
+            <div class="exp-card" id="card-misc">
+              <div class="claim-stamp">Claim No: <span class="claim-text-inline">—</span></div>
+              <h3>(E) Miscellaneous Expenses</h3>
+              <div class="exp-grid">
+                <div class="cell"><label>Date</label><input type="date" id="misc-date"></div>
+                <div class="cell"><label>Particulars</label><input type="text" id="misc-particulars"></div>
+                <div class="cell"><label>Amount</label><input type="text" id="misc-amt"></div>
+                <div class="cell"><label>Bill No</label><input type="text" id="misc-bill"></div>
+                <div class="cell"><label>Bill File</label><input type="file" id="misc-file" accept=".pdf,.jpg,.jpeg,.png" multiple></div>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn-secondary" data-addentry="misc">Add Entry</button>
+                <button type="button" class="btn" data-submit-section="misc">Submit</button>
+                <button type="button" class="btn-secondary" data-reset-section="misc">Reset</button>
+              </div>
+            </div>
+
+            <!-- Summary -->
+            <div class="summary-wrap">
+              <div class="summary-head">Summary</div>
+              <table class="sum-table" id="summaryTable">
+                <thead>
+                  <tr>
+                    <th style="width:70px;">Sl No</th>
+                    <th>Main Contents</th>
+                    <th style="width:140px;">Amount Claimed</th>
+                    <th style="width:180px;">Remarks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td>A</td><td>Travel Fare</td><td class="sum-amount" id="sum-fare">0.00</td><td></td></tr>
+                  <tr><td>B</td><td>Local Travel</td><td class="sum-amount" id="sum-local">0.00</td><td></td></tr>
+                  <tr><td>C</td><td>Hotel Accommodation</td><td class="sum-amount" id="sum-hotel">0.00</td><td></td></tr>
+                  <tr><td>D</td><td>Daily Allowance & Food Allowance</td><td class="sum-amount" id="sum-da">0.00</td><td></td></tr>
+                  <tr><td>E</td><td>Miscellaneous Expenses</td><td class="sum-amount" id="sum-misc">0.00</td><td></td></tr>
+                </tbody>
+                <tfoot>
+                  <tr class="summary-total">
+                    <th colspan="2" style="text-align:right;">Total Amount</th>
+                    <th class="sum-amount" id="sum-total">0.00</th>
+                    <th></th>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </form>
+        </div>
       </div>
 
-      <!-- Cash Voucher -->
+      <!-- Cash Voucher (replaced with Dept version) -->
       <div id="page-cash-form" class="page">
-        <span class="back" data-target="page-upload">← Back</span>
-        <h2>Cash Voucher</h2>
-        <form class="form" id="cashForm" data-code="C">
-          <div class="form-row"><label>Date:-</label><input type="date" required /></div>
-          <div class="form-row"><label>Supplier Name:-</label><input type="text" required /></div>
-          <div class="form-row"><label>Bill Date:-</label><input type="date" required /></div>
-          <div class="form-row"><label>Amount:-</label><input type="number" step="0.01" min="0" required /></div>
-          <div class="form-row"><label>Work Order:-</label><input type="text" /></div>
-          <div class="form-row"><label>Remarks:-</label><textarea></textarea></div>
-          <div class="form-row"><label>Upload Bill:-</label><input type="file" accept=".pdf,.jpg,.jpeg,.png" required /></div>
-          <div class="form-row"><label>Voucher Number:-</label><input class="vno" type="text" placeholder="e.g., 7" required /></div>
-          <div class="form-row"><label>Claim No:-</label><input class="claim" type="text" readonly /></div>
-          <div class="form-actions"><button type="submit" class="btn-primary">Submit</button><button type="reset" class="btn-secondary">Reset</button></div>
-        </form>
+        <div class="content-card">
+          <span class="back" data-target="page-upload">← Back</span>
+          <h2>Cash Voucher</h2>
+          <form class="form" id="cashForm" data-code="C">
+            <div class="form-row"><label>Date:-</label><input id="cash-date" type="date" required /></div>
+            <div class="form-row"><label>Particulars:-</label><input id="cash-particulars" type="text" placeholder="Type particulars..." /></div>
+            <div class="form-row">
+              <label>HEAD OF ACCOUNT:-</label>
+              <select id="cash-head">
+                <option value="" selected disabled>-- Select Head of Account --</option>
+                <option>Conveyance</option><option>Staff Welfare Expenses</option><option>Printing & Stationary</option>
+                <option>Postage & Telegram</option><option>Vehicle Maintenance</option><option>Frieght(Inward / Forward)</option>
+                <option>Raw Materials</option><option>Consumable</option><option>Others</option>
+              </select>
+            </div>
+            <div class="form-row"><label>Amount:-</label><input id="cash-amount" type="number" step="0.01" min="0" placeholder="0.00" /></div>
+            <div class="form-actions"><button type="submit" class="btn">Submit</button><button type="reset" class="btn-secondary">Reset</button></div>
+
+            <div class="form-row">
+              <div class="table-wrap">
+                <table class="small-table" id="cashItemsTable">
+                  <thead><tr><th>Date</th><th>Particulars</th><th>Head of Account</th><th class="right">Amount</th></tr></thead>
+                  <tbody id="cashItemsBody"><tr><td colspan="4" class="muted">No items added.</td></tr></tbody>
+                  <tfoot><tr><th colspan="3" class="right">Total</th><th class="right">₹ <span id="cashTotal">0.00</span></th></tr></tfoot>
+                </table>
+              </div>
+            </div>
+            <input id="cashTotalInput" type="number" step="0.01" name="total" hidden />
+          </form>
+        </div>
       </div>
 
       <!-- Others Voucher -->
       <div id="page-others-form" class="page">
-        <span class="back" data-target="page-upload">← Back</span>
-        <h2>Others Voucher</h2>
-        <form class="form" id="othersForm" data-code="O">
-          <div class="form-row"><label>Date:-</label><input type="date" required /></div>
-          <div class="form-row"><label>Supplier Name:-</label><input type="text" required /></div>
-          <div class="form-row"><label>Bill Date:-</label><input type="date" required /></div>
-          <div class="form-row"><label>Amount:-</label><input type="number" step="0.01" min="0" required /></div>
-          <div class="form-row"><label>Work Order:-</label><input type="text" /></div>
-          <div class="form-row"><label>Remarks:-</label><textarea></textarea></div>
-          <div class="form-row"><label>Upload Bill:-</label><input type="file" accept=".pdf,.jpg,.jpeg,.png" required /></div>
-          <div class="form-row"><label>Voucher Number:-</label><input class="vno" type="text" placeholder="e.g., 301" required /></div>
-          <div class="form-row"><label>Claim No:-</label><input class="claim" type="text" readonly /></div>
-          <div class="form-actions"><button type="submit" class="btn-primary">Submit</button><button type="reset" class="btn-secondary">Reset</button></div>
-        </form>
-      </div>
-
-      <!-- Payment Request main (two sub-buttons) -->
-      <div id="page-payment" class="page">
-        <span class="back" data-target="page-home">← Back</span>
-        <h2>Payment Request</h2>
-        <div class="actions">
-          <button class="action-btn" data-target="page-payment-form">Submit Payment Request</button>
-          <button class="action-btn" data-target="page-payment-view">View Payment Request</button>
+        <div class="content-card">
+          <span class="back" data-target="page-upload">← Back</span>
+          <h2>Others Voucher</h2>
+          <form class="form" id="othersForm" data-code="O">
+            <div class="claim-stamp">Claim No: <span class="claim-text">—</span></div>
+            <input type="hidden" class="claim" />
+            <div class="form-row"><label>Date:-</label><input id="ov-date" type="date" required /></div>
+            <div class="form-row"><label>Description:-</label><input id="ov-desc" type="text" required /></div>
+            <div class="form-row"><label>Amount:-</label><input id="ov-amt" type="text" required /></div>
+            <div class="form-row"><label>Work Order:-</label><input id="ov-wo" type="text" /></div>
+            <div class="form-row"><label>Remarks:-</label><input id="ov-remarks" type="text" /></div>
+            <div class="form-row"><label>Upload Bill:-</label><input id="ov-file" type="file" accept=".pdf,.jpg,.jpeg,.png" multiple /></div>
+            <div class="form-actions"><button type="submit" class="btn">Submit</button><button type="reset" class="btn-secondary">Reset</button></div>
+          </form>
         </div>
       </div>
 
-      <!-- Submit Payment Request form -->
+      <!-- Submit Payment Request (kept, style aligned) -->
       <div id="page-payment-form" class="page">
-        <span class="back" data-target="page-payment">← Back</span>
-        <h2>Submit Payment Request</h2>
-        <form class="form" id="paymentForm" data-code="PR">
-          <div class="form-row"><label>Date:-</label><input id="pr-date" type="date" required /></div>
-          <div class="form-row"><label>Description:-</label><textarea id="pr-desc" required></textarea></div>
-          <div class="form-row"><label>Amount:-</label><input id="pr-amt" type="number" step="0.01" min="0" required /></div>
-          <div class="form-row"><label>Work Order:-</label><input id="pr-wo" type="text" /></div>
-          <div class="form-row"><label>Remarks:-</label><textarea id="pr-rem"></textarea></div>
-          <div class="form-row"><label>Voucher Number:-</label><input class="vno" id="pr-vno" type="text" placeholder="e.g., 123" required /></div>
-          <div class="form-row"><label>Claim No:-</label><input class="claim" id="pr-claim" type="text" readonly /></div>
-          <div class="form-actions">
-            <button type="submit" class="btn-primary">Submit</button>
-            <button type="reset" class="btn-secondary">Reset</button>
-          </div>
-        </form>
+        <div class="content-card">
+          <span class="back" data-target="page-home">← Back</span>
+          <h2>Submit Payment Request</h2>
+          <form class="form" id="paymentForm" data-code="PR">
+            <div class="claim-stamp">Claim No: <span class="claim-text">—</span></div>
+            <input type="hidden" class="claim" id="pr-claim" />
+            <div class="form-row"><label>Date:-</label><input id="pr-date" type="date" required /></div>
+            <div class="form-row"><label>Description:-</label><input id="pr-desc" type="text" required /></div>
+            <div class="form-row"><label>Amount:-</label><input id="pr-amount" type="text" placeholder="20000" required /></div>
+            <div class="form-row"><label>Work Order:-</label><input id="pr-wo" type="text" /></div>
+            <div class="form-row"><label>Remarks:-</label><input id="pr-remarks" type="text" required /></div>
+            <div class="form-actions">
+              <button type="submit" class="btn">Submit</button>
+              <button type="reset" class="btn-secondary">Reset</button>
+            </div>
+          </form>
+        </div>
       </div>
 
-      <!-- View Payment Request (table + workflow) -->
+      <!-- View Payment Request (Dept table style) -->
       <div id="page-payment-view" class="page">
-        <span class="back" data-target="page-payment">← Back</span>
-        <h2>View Payment Request</h2>
-        <div class="table-wrap">
-          <table id="pr-table">
-            <thead>
-              <tr>
-                <th>SL</th>
-                <th>Date</th>
-                <th>Claim No</th>
-                <th>Amount</th>
-                <th>Department Head</th>
-                <th>Finance Head</th>
-                <th>Accountant</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+        <div class="content-card">
+          <span class="back" data-target="page-home">← Back</span>
+          <h2>View Payment Request</h2>
+          <div class="table-wrap">
+            <table class="data" id="paymentTable">
+              <thead>
+                <tr>
+                  <th style="width:50px;">SL</th>
+                  <th style="width:120px;">Date</th>
+                  <th>Claim No</th>
+                  <th style="width:120px;">Amount</th>
+                  <th>Department Head</th>
+                  <th>Finance Head</th>
+                  <th>Accountant</th>
+                </tr>
+              </thead>
+              <tbody id="paymentTbody">
+                <tr class="empty"><td colspan="7">No payment requests yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="actions" style="margin-top:10px">
+            <button id="refreshStatusBtn" class="btn-secondary">Refresh Statuses</button>
+            <button id="seedDemoBtn" class="btn-secondary">Add Demo Rows</button>
+          </div>
         </div>
       </div>
 
-      <!-- Download Ledger -->
-      <div id="page-ledger" class="page">
-        <span class="back" data-target="page-home">← Back</span>
-        <h2>Download Ledger</h2>
-        <div class="actions">
-          <button class="action-btn" data-route="ledger-start-date.html">Start Date</button>
-          <button class="action-btn" data-route="ledger-end-date.html">End Date</button>
-        </div>
-      </div>
+      <!-- Download Ledger (Dept version) -->
+      <section id="dv-ledger" class="page">
+        <div class="content-card">
+          <span class="back" data-target="page-home">← Back</span>
+          <h2>Download Ledger</h2>
 
-      <!-- View Voucher -->
+          <div class="ledger-actions">
+            <button class="btn-secondary" onclick="window.print()">Print / Download</button>
+          </div>
+
+          <div class="ledger-wrap" id="ledgerArea">
+            <div class="ledger-top">
+              <div class="ledger-title">
+                <input id="ledgerName" value="HANUMANTHA" style="font:inherit;font-weight:800;border:none;border-bottom:1px solid #111;outline:0;width:100%;max-width:360px"/>
+              </div>
+              <table class="ledger-total">
+                <tr><th>TOTAL</th><th>CREDIT</th><td id="lt-credit" class="number">0</td></tr>
+                <tr><td></td><th>DEBIT</th><td id="lt-debit" class="number">0</td></tr>
+                <tr><td></td><th>BALANCE</th><td id="lt-balance" class="number">0</td></tr>
+              </table>
+            </div>
+
+            <table class="ledger-box" id="ledgerTable">
+              <thead>
+                <tr>
+                  <th style="width:60px;">SL NO.</th>
+                  <th style="width:140px;">DATE</th>
+                  <th>VOUCHER NO</th>
+                  <th style="width:140px;">DEBIT</th>
+                  <th style="width:140px;">CREDIT</th>
+                  <th>REMARKS</th>
+                </tr>
+              </thead>
+              <tbody id="ledgerBody"></tbody>
+              <tfoot>
+                <tr>
+                  <th colspan="3" style="text-align:right">TOTAL</th>
+                  <th id="lb-debit" class="number">0</th>
+                  <th id="lb-credit" class="number">0</th>
+                  <th></th>
+                </tr>
+              </tfoot>
+            </table>
+            <div class="print-note">Tip: Use the Print button above to save as PDF.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- View Voucher (NEW table, columns: Dept → Finance → Accountant) -->
       <div id="page-view" class="page">
-        <span class="back" data-target="page-home">← Back</span>
-        <h2>View Voucher</h2>
-        <div class="table-wrap">
-          <table id="voucher-table">
-            <thead>
-              <tr>
-                <th>SL</th>
-                <th>Date</th>
-                <th>Claim No</th>
-                <th>Amount</th>
-                <th>Accountant</th>
-                <th>Department Head</th>
-                <th>Finance Head</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+        <div class="content-card">
+          <span class="back" data-target="page-home">← Back</span>
+          <h2>View Voucher</h2>
+          <div class="table-wrap">
+            <table class="data" id="voucherTable">
+              <thead>
+                <tr>
+                  <th style="width:50px;">SL</th>
+                  <th style="width:120px;">Date</th>
+                  <th>Claim No</th>
+                  <th style="width:120px;">Amount</th>
+                  <th>Department Head</th>
+                  <th>Finance Head</th>
+                  <th>Accountant</th>
+                </tr>
+              </thead>
+              <tbody id="voucherTbody">
+                <tr class="empty"><td colspan="7">No vouchers yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="actions" style="margin-top:10px">
+            <button id="voucherRefreshBtn" class="btn-secondary">Refresh Statuses</button>
+            <button id="voucherSeedBtn" class="btn-secondary">Add Demo Rows</button>
+          </div>
         </div>
       </div>
+
     </section>
   </div>
 
   <script>
-    /* Username sources: window.APP_USERNAME, <body data-username>, cookie "username" */
-    function readCookie(name){
-      return document.cookie.split('; ').find(r=>r.startsWith(name+'='))?.split('=')[1] || '';
+    /* ============ Helpers ============ */
+    function readCookie(name){ return document.cookie.split('; ').find(r=>r.startsWith(name+'='))?.split('=')[1] || ''; }
+    function getUsername(){ return (window.APP_USERNAME || document.body.dataset.username || readCookie('username') || '').trim(); }
+    function firstLetterOfUser(){ const u=getUsername(); return u ? u[0].toUpperCase() : 'X'; }
+
+    function previewSeq(code){
+      const k='seq_'+code; const n=parseInt(localStorage.getItem(k)||'0',10);
+      return n+1;
     }
-    function getUsername(){
-      return (window.APP_USERNAME || document.body.dataset.username || readCookie('username') || '').trim();
+    function commitSeq(code){
+      const k='seq_'+code; const n=parseInt(localStorage.getItem(k)||'0',10)+1;
+      localStorage.setItem(k, String(n));
+      return n;
     }
-    function firstLetterOfUser(){
-      const u=getUsername(); return u ? u[0].toUpperCase() : '';
+    function formatClaim(code, seq){
+      const fl=firstLetterOfUser();
+      return code==='PR' ? `${fl}-PR-${seq}` : `${fl}-${code}V-${seq}`;
     }
 
-    /* Page switching */
-    const mainButtons=document.querySelectorAll('.main-btn');
+    /* ============ Navigation ============ */
     const pages=document.querySelectorAll('.page');
     function showPage(id){
       pages.forEach(p=>p.classList.remove('active'));
-      const page=document.getElementById(id);
-      (page||document.getElementById('page-home')).classList.add('active');
-      updateAllClaims();
-      if(id==='page-payment-view'){ processAutoApprovals(); renderPRTable(); }
+      const pg=document.getElementById(id)||document.getElementById('page-home');
+      pg.classList.add('active');
+      const form=pg.querySelector('form');
+      if(form) updateClaimPreview(form);
+      if(id==='page-payment-view'){ renderPaymentTable(); }
       if(id==='page-view'){ renderVoucherTable(); }
+      if(id==='dv-ledger' && !window._ledgerInit){ fillSampleLedger(); window._ledgerInit=true; }
     }
-    mainButtons.forEach(btn=>btn.addEventListener('click',()=>showPage(btn.dataset.target)));
-    document.querySelectorAll('.back').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.target)));
-    document.querySelectorAll('.action-btn').forEach(b=>{
-      b.addEventListener('click',()=>{
-        const target=b.dataset.target; const route=b.dataset.route;
-        if(target){ showPage(target); } else if(route){ alert('Go to: '+route); }
+    document.querySelectorAll('[data-target]').forEach(btn=>{
+      btn.addEventListener('click',()=> showPage(btn.dataset.target));
+    });
+
+    /* ============ Claim preview for forms ============ */
+    function updateClaimPreview(formEl){
+      const code=formEl?.dataset?.code; if(!code) return;
+      const seqPreview = previewSeq(code);
+      const claim = formatClaim(code, seqPreview);
+      formEl.querySelectorAll('.claim-text,.claim-text-inline').forEach(el=> el.textContent = claim);
+      const hidden=formEl.querySelector('.claim');
+      if(hidden) hidden.value = claim;
+    }
+
+    function wireUVForm(formId, successMsg){
+      const f=document.getElementById(formId); if(!f) return;
+      updateClaimPreview(f);
+      f.addEventListener('submit',(e)=>{
+        e.preventDefault();
+        const code=f.dataset.code;
+        const finalSeq = commitSeq(code);
+        const finalClaim = formatClaim(code, finalSeq);
+        f.querySelectorAll('.claim-text,.claim-text-inline').forEach(el=> el.textContent = finalClaim);
+        const hidden=f.querySelector('.claim'); if(hidden) hidden.value = finalClaim;
+        alert(`${successMsg}\nClaim No: ${finalClaim}`);
+      });
+      f.addEventListener('reset',()=> setTimeout(()=>{ updateClaimPreview(f); if(formId==='travelForm'){ clearTravelTotals(); } },0));
+    }
+
+    /* Hook simple forms for alert only (Others will be stored via voucher logic below) */
+    wireUVForm('purchaseForm','Purchase voucher submitted!');
+    wireUVForm('travelForm','Travel voucher submitted!');
+    wireUVForm('othersForm','Other voucher submitted!');
+
+    /* ============ Travel sub-sections show/hide ============ */
+    function hideAllExpenseCards(){ document.querySelectorAll('.exp-card').forEach(c=>c.classList.remove('active')); }
+    document.querySelectorAll('[data-exp]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        hideAllExpenseCards();
+        const card=document.getElementById('card-'+btn.dataset.exp);
+        if(card){ card.classList.add('active'); const form=card.closest('form'); if(form) updateClaimPreview(form); }
+      });
+    });
+    hideAllExpenseCards();
+
+    /* ============ Summary auto-calculation (Add Entry) ============ */
+    const travelTotals = { fare:0, local:0, hotel:0, da:0, misc:0 };
+    function parseAmount(str){
+      if(!str) return 0;
+      const cleaned = (str+'').replace(/[^0-9.]/g,'');
+      const num = parseFloat(cleaned);
+      return isNaN(num) ? 0 : num;
+    }
+    function updateSummaryUI(){
+      const fmt = v => v.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2});
+      document.getElementById('sum-fare').textContent = fmt(travelTotals.fare);
+      document.getElementById('sum-local').textContent = fmt(travelTotals.local);
+      document.getElementById('sum-hotel').textContent = fmt(travelTotals.hotel);
+      document.getElementById('sum-da').textContent = fmt(travelTotals.da);
+      document.getElementById('sum-misc').textContent = fmt(travelTotals.misc);
+      const total = travelTotals.fare + travelTotals.local + travelTotals.hotel + travelTotals.da + travelTotals.misc;
+      document.getElementById('sum-total').textContent = fmt(total);
+    }
+    function clearTravelTotals(){
+      travelTotals.fare = travelTotals.local = travelTotals.hotel = travelTotals.da = travelTotals.misc = 0;
+      updateSummaryUI();
+    }
+    updateSummaryUI();
+
+    // Add Entry – accumulates amounts
+    document.querySelectorAll('[data-addentry]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const kind = btn.getAttribute('data-addentry');
+        let amt = 0;
+        if(kind==='fare'){ amt = parseAmount(document.getElementById('fare-amt').value); }
+        else if(kind==='local'){ amt = parseAmount(document.getElementById('local-amt').value); }
+        else if(kind==='hotel'){ amt = parseAmount(document.getElementById('hotel-amt').value); }
+        else if(kind==='da'){ amt = parseAmount(document.getElementById('da-amt').value); }
+        else if(kind==='misc'){ amt = parseAmount(document.getElementById('misc-amt').value); }
+        travelTotals[kind] += amt;
+        updateSummaryUI();
+        alert('Entry added. Summary updated (fields kept).');
       });
     });
 
-    /* Claim generation
-       - Vouchers (P/T/C/O): (FL)-(Code)V-(VoucherNo)
-       - Payment Request (PR): (FL)-PR-(VoucherNo)
-    */
-    function generateClaim(formEl){
-      const code=formEl.dataset.code || '?';
-      const vno=(formEl.querySelector('.vno')?.value||'').trim();
-      const fl=firstLetterOfUser();
-      let claim='';
-      if(fl && vno){
-        claim = (code==='PR') ? `${fl}-PR-${vno}` : `${fl}-${code}V-${vno}`;
-      }
-      const claimInput=formEl.querySelector('.claim');
-      if(claimInput) claimInput.value = claim;
-    }
-    function wireForm(formId, successMsg, backPageId, onAfterSubmit){
-      const f=document.getElementById(formId); if(!f) return;
-      const vno=f.querySelector('.vno');
-      if(vno){ vno.addEventListener('input',()=>generateClaim(f)); }
-      generateClaim(f);
-      f.addEventListener('submit',(e)=>{
-        e.preventDefault();
-        generateClaim(f);
-        const claim = f.querySelector('.claim')?.value || '';
-        alert(`${successMsg}\nClaim No: ${claim || '(not set)'}`);
-        if(onAfterSubmit){ onAfterSubmit(f, claim); }
-        f.reset(); generateClaim(f);
-        showPage(backPageId);
+    // Section Submit – acknowledge only
+    document.querySelectorAll('[data-submit-section]').forEach(btn=>{
+      btn.addEventListener('click',()=>{ alert('Section submitted (fields kept).'); });
+    });
+
+    // Section Reset – only clears that section
+    document.querySelectorAll('[data-reset-section]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const section = btn.getAttribute('data-reset-section');
+        const card = document.getElementById('card-'+section);
+        if(!card) return;
+        card.querySelectorAll('input[type="text"], input[type="date"], input[type="datetime-local"]').forEach(inp=> inp.value='');
+        card.querySelectorAll('input[type="file"]').forEach(inp=> inp.value='');
       });
-      f.addEventListener('reset',()=> setTimeout(()=>generateClaim(f),0));
+    });
+
+    /* ============ Payment Request storage + approvals (Dept table style) ============ */
+    const LS_KEY='paymentRequests';
+    const TWO_DAYS=2*24*60*60*1000;
+    function loadPR(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)||'[]'); }catch{ return []; } }
+    function savePR(arr){ localStorage.setItem(LS_KEY, JSON.stringify(arr)); }
+    function addPaymentRequest({date, amount, claimNo}){
+      const arr=loadPR(); const now=Date.now();
+      arr.push({ id:'pr_'+now, date, amount, claimNo, createdAt:now,
+        stages:{dept:{status:'Pending',updatedAt:now},finance:{status:'Pending',updatedAt:null},accountant:{status:'Pending',updatedAt:null}},
+        currentStage:'dept' });
+      savePR(arr);
     }
-    function updateAllClaims(){
-      ['purchaseForm','travelForm','cashForm','othersForm','paymentForm'].forEach(id=>{
-        const f=document.getElementById(id); if(f) generateClaim(f);
-      });
+    function approveStage(item, stage, auto=false){
+      item.stages[stage].status = auto ? 'Auto-approved' : 'Approved';
+      item.stages[stage].updatedAt = Date.now();
+      const order=['dept','finance','accountant'], idx=order.indexOf(stage);
+      if(idx<order.length-1){ const next=order[idx+1]; item.currentStage=next; if(item.stages[next].updatedAt==null) item.stages[next].updatedAt=Date.now(); }
+      else item.currentStage='done';
     }
-
-    /* ===== Payment Request storage & workflow (localStorage) ===== */
-    const PR_STORAGE_KEY='payment_requests';
-    const TWO_DAYS_MS=2*24*60*60*1000;
-
-    function loadPRs(){ try{ return JSON.parse(localStorage.getItem(PR_STORAGE_KEY)||'[]'); }catch{ return []; } }
-    function savePRs(arr){ localStorage.setItem(PR_STORAGE_KEY, JSON.stringify(arr)); }
-
-    function addPaymentRequestFromForm(formEl, claim){
-      const pr={
-        id: Date.now(),
-        date: formEl.querySelector('#pr-date')?.value || '',
-        description: formEl.querySelector('#pr-desc')?.value || '',
-        amount: parseFloat(formEl.querySelector('#pr-amt')?.value || '0') || 0,
-        workOrder: formEl.querySelector('#pr-wo')?.value || '',
-        remarks: formEl.querySelector('#pr-rem')?.value || '',
-        voucherNo: formEl.querySelector('#pr-vno')?.value || '',
-        claimNo: claim,
-        stage: 'dept',            // dept -> fin -> acct -> done
-        assignedAt: Date.now(),   // when current stage started
-        approvals: {
-          dept: { status:'pending', decidedAt:null },
-          fin:  { status:'blocked', decidedAt:null },
-          acct: { status:'blocked', decidedAt:null }
-        }
-      };
-      const arr=loadPRs();
-      arr.push(pr);
-      savePRs(arr);
-    }
-
-    function processAutoApprovals(){
-      const arr = loadPRs();
-      const now = Date.now();
-      let changed=false;
-
-      function autoApprove(pr, role, nextStage){
-        if(pr.approvals[role].status==='pending'){
-          pr.approvals[role].status='auto-approved';
-          pr.approvals[role].decidedAt=now;
-          pr.stage=nextStage;
-          pr.assignedAt= now;
-          changed=true;
+    function applyAutoApprovals(item){
+      const order=['dept','finance','accountant'];
+      for(const stage of order){
+        const st=item.stages[stage];
+        if(st.status==='Pending'){
+          const base = st.updatedAt ?? item.createdAt;
+          if(Date.now()-base >= TWO_DAYS){ approveStage(item, stage, true); continue; }
+          else break;
         }
       }
-
-      arr.forEach(pr=>{
-        if(pr.stage==='done') return;
-        const elapsed = now - (pr.assignedAt || now);
-        if(elapsed >= TWO_DAYS_MS){
-          if(pr.stage==='dept') autoApprove(pr,'dept','fin');
-          else if(pr.stage==='fin'){
-            if(pr.approvals.fin.status!=='approved') pr.approvals.fin.status='auto-approved';
-            pr.approvals.fin.decidedAt=now;
-            pr.stage='acct';
-            pr.assignedAt=now;
-            changed=true;
-          }else if(pr.stage==='acct'){
-            if(pr.approvals.acct.status!=='approved') pr.approvals.acct.status='auto-approved';
-            pr.approvals.acct.decidedAt=now;
-            pr.stage='done';
-            pr.assignedAt=null;
-            changed=true;
-          }
-        }
-      });
-
-      if(changed) savePRs(arr);
+      if(item.stages.dept.status==='Pending') item.currentStage='dept';
+      else if(item.stages.finance.status==='Pending') item.currentStage='finance';
+      else if(item.stages.accountant.status==='Pending') item.currentStage='accountant';
+      else item.currentStage='done';
+      return item;
     }
-
-    function approveManually(id){
-      const arr=loadPRs();
-      const pr=arr.find(x=>x.id===id);
-      if(!pr) return;
-
+    function manualApprove(id){
+      const arr=loadPR(); const item=arr.find(x=>x.id===id); if(!item) return;
+      applyAutoApprovals(item); if(item.currentStage==='done'){ savePR(arr); renderPaymentTable(); return; }
+      approveStage(item, item.currentStage, false); savePR(arr); renderPaymentTable();
+    }
+    function renderStageCell(item, stage){
+      const st=item.stages[stage], isActive=item.currentStage===stage, statusText=st.status;
+      let cls='s-pending'; if(statusText==='Approved') cls='s-approved';
+      else if(statusText==='Auto-approved') cls='s-auto';
+      const updated = st.updatedAt ? new Date(st.updatedAt).toLocaleString() : '—';
+      const btn = isActive ? ` <button class="btn-secondary" style="padding:4px 8px" onclick="manualApprove('${item.id}')">Approve</button>` : '';
+      return `<span class="${cls}">${statusText}</span>${btn}<span class="muted">Updated: ${updated}</span>`;
+    }
+    function renderPaymentTable(){
+      let arr=loadPR(); const tbody=document.getElementById('paymentTbody'); if(!tbody) return;
+      if(arr.length===0){ tbody.innerHTML=`<tr class="empty"><td colspan="7">No payment requests yet.</td></tr>`; return; }
+      arr=arr.map(applyAutoApprovals); savePR(arr);
+      tbody.innerHTML='';
+      arr.forEach((item,i)=>{
+        const num = parseFloat((item.amount+'').replace(/[^0-9.]/g,''))||0;
+        const fmtAmt=num.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+        const tr=document.createElement('tr');
+        tr.innerHTML = `
+          <td>${i+1}</td><td>${item.date||'-'}</td><td>${item.claimNo||'-'}</td>
+          <td>${fmtAmt}</td>
+          <td>${renderStageCell(item,'dept')}</td>
+          <td>${renderStageCell(item,'finance')}</td>
+          <td>${renderStageCell(item,'accountant')}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+    document.getElementById('seedDemoBtn')?.addEventListener('click',()=>{
       const now=Date.now();
-      if(pr.stage==='dept'){
-        pr.approvals.dept.status='approved';
-        pr.approvals.dept.decidedAt=now;
-        pr.stage='fin'; pr.assignedAt=now;
-      }else if(pr.stage==='fin'){
-        pr.approvals.fin.status='approved';
-        pr.approvals.fin.decidedAt=now;
-        pr.stage='acct'; pr.assignedAt=now;
-      }else if(pr.stage==='acct'){
-        pr.approvals.acct.status='approved';
-        pr.approvals.acct.decidedAt=now;
-        pr.stage='done'; pr.assignedAt=null;
+      addPaymentRequest({date:new Date().toISOString().slice(0,10), amount:'1500', claimNo:'X-PR-101'});
+      const arr=loadPR();
+      arr.push({ id:'pr_demo_'+(now-1), date:new Date(now-3*24*60*60*1000).toISOString().slice(0,10),
+        amount:'2500', claimNo:'Y-PR-202', createdAt: now-(2*24*60*60*1000+60*60*1000),
+        stages:{dept:{status:'Pending',updatedAt:now-(2*24*60*60*1000+60*60*1000)}, finance:{status:'Pending',updatedAt:null}, accountant:{status:'Pending',updatedAt:null}},
+        currentStage:'dept' });
+      savePR(arr); renderPaymentTable(); alert('Demo rows added.');
+    });
+    document.getElementById('refreshStatusBtn')?.addEventListener('click',()=>{
+      const arr=loadPR().map(applyAutoApprovals); savePR(arr); renderPaymentTable();
+    });
+
+    /* ===== Ledger page logic (Dept version) ===== */
+    const ledgerBody=document.getElementById('ledgerBody');
+    function fmtInt(n){ const num=parseInt((n||0),10); return isNaN(num)?'0':num.toLocaleString(); }
+    function renderLedgerRows(rows){
+      ledgerBody.innerHTML='';
+      const max=10;
+      let debitSum=0, creditSum=0;
+      for(let i=0;i<max;i++){
+        const r=rows[i]||{date:'',voucher:'',debit:'',credit:'',remarks:''};
+        const d=parseInt(r.debit||0,10)||0; const c=parseInt(r.credit||0,10)||0;
+        debitSum+=d; creditSum+=c;
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${i+1}</td><td>${r.date||''}</td><td>${r.voucher||''}</td>
+                      <td class="number">${r.debit?fmtInt(r.debit):''}</td>
+                      <td class="number">${r.credit?fmtInt(r.credit):''}</td>
+                      <td>${r.remarks||''}</td>`;
+        ledgerBody.appendChild(tr);
       }
-      savePRs(arr);
-      renderPRTable();
+      document.getElementById('lb-debit').textContent=fmtInt(debitSum);
+      document.getElementById('lb-credit').textContent=fmtInt(creditSum);
+      document.getElementById('lt-debit').textContent=fmtInt(debitSum);
+      document.getElementById('lt-credit').textContent=fmtInt(creditSum);
+      document.getElementById('lt-balance').textContent=fmtInt(creditSum - debitSum);
+    }
+    function fillSampleLedger(){
+      const rows=[
+        {date:'30-06-2025', voucher:'OPENING BALANCE', debit:103941, credit:'', remarks:'TILL DATE C/F'},
+        {date:'16-08-2025', voucher:'H-PV-001', debit:1500, credit:'', remarks:''},
+        {date:'18-08-2025', voucher:'H-PR-008', debit:'', credit:5000, remarks:''},
+      ];
+      renderLedgerRows(rows);
     }
 
-    function statusChip(role, st){
-      const map={ 'approved':'approved', 'auto-approved':'auto', 'pending':'pending', 'blocked':'blocked', 'done':'done' };
-      const cls=map[st]||'';
-      return `<span class="chip ${cls}">${st.replace('-', ' ')}</span>`;
-    }
+    /* ===== Voucher storage (NEW) — column order: Dept → Finance → Accountant ===== */
+    const V_KEY='vouchers';
+    const loadV=()=>{try{return JSON.parse(localStorage.getItem(V_KEY)||'[]')}catch{return[]}};
+    const saveV=(a)=>localStorage.setItem(V_KEY,JSON.stringify(a));
+    const sessionFileURLs={};
 
-    function stageActionCell(pr, role){
-      const activeRole = pr.stage==='dept' ? 'dept' : pr.stage==='fin' ? 'fin' : pr.stage==='acct' ? 'acct' : null;
-      const st = pr.approvals[role].status;
-      if(activeRole===role && st==='pending'){
-        const deadline = pr.assignedAt ? (pr.assignedAt + TWO_DAYS_MS) : null;
-        const remaining = deadline ? Math.max(0, deadline - Date.now()) : 0;
-        const hrs = Math.floor(remaining/3600000);
-        const mins = Math.floor((remaining%3600000)/60000);
-        const hint = remaining ? ` (${hrs}h ${mins}m left)` : '';
-        return `
-          ${statusChip(role, 'pending')}
-          <button class="approve-btn" data-approve="${pr.id}">Approve</button>
-          <span class="muted">${hint}</span>
-        `;
-      }
-      return statusChip(role, st);
-    }
-
-    function renderPRTable(){
-      processAutoApprovals(); // ensure timers applied
-      const tbody=document.querySelector('#pr-table tbody');
-      const arr=loadPRs();
-
-      if(!arr.length){
-        tbody.innerHTML = `<tr><td colspan="7" class="muted">No payment requests yet.</td></tr>`;
-        return;
-      }
-
-      tbody.innerHTML = arr.map((pr, idx)=>`
-        <tr>
-          <td>${idx+1}</td>
-          <td>${pr.date || '-'}</td>
-          <td>${pr.claimNo || '-'}</td>
-          <td>${pr.amount.toFixed(2)}</td>
-          <td>${stageActionCell(pr,'dept')}</td>
-          <td>${stageActionCell(pr,'fin')}</td>
-          <td>${stageActionCell(pr,'acct')}</td>
-        </tr>
-      `).join('');
-
-      // Wire approve buttons
-      tbody.querySelectorAll('[data-approve]').forEach(btn=>{
-        btn.addEventListener('click',()=> approveManually(Number(btn.dataset.approve)));
+    function addVoucher(v){
+      const arr=loadV(); const now=Date.now();
+      // Start with Department Head stage first (per your order)
+      arr.push({
+        id:'v_'+now, createdAt:now, currentStage:'dept',
+        stages:{dept:{status:'Pending',updatedAt:now},finance:{status:'Pending',updatedAt:null},accountant:{status:'Pending',updatedAt:null}},
+        ...v
       });
+      saveV(arr);
     }
 
-    // Auto-refresh the payment view every 60s to reflect auto-approvals
-    setInterval(()=>{
-      const active = document.querySelector('#page-payment-view.page.active');
-      if(active){ renderPRTable(); }
-    }, 60000);
-
-    /* ===== Vouchers storage (from forms) ===== */
-    const VOUCHER_KEY = 'vouchers';
-
-    function loadVouchers(){ 
-      try{ return JSON.parse(localStorage.getItem(VOUCHER_KEY)||'[]'); }catch{ return []; }
-    }
-    function saveVouchers(arr){ 
-      localStorage.setItem(VOUCHER_KEY, JSON.stringify(arr)); 
+    function approveStageV(item, stage){
+      item.stages[stage].status='Approved'; item.stages[stage].updatedAt=Date.now();
+      const order=['dept','finance','accountant'], idx=order.indexOf(stage);
+      if(idx<order.length-1){
+        const next=order[idx+1];
+        item.currentStage=next;
+        if(item.stages[next].updatedAt==null) item.stages[next].updatedAt=Date.now();
+      }else{
+        item.currentStage='done';
+      }
     }
 
-    function addVoucherFromForm(formEl, claim){
-      const dateEls = formEl.querySelectorAll('input[type="date"]');
-      const date = dateEls[0]?.value || '';
-      const amount = parseFloat(formEl.querySelector('input[type="number"]')?.value||'0') || 0;
+    function manualApproveVoucher(id){
+      const arr=loadV(); const it=arr.find(x=>x.id===id); if(!it) return;
+      if(it.currentStage==='done'){ saveV(arr); renderVoucherTable(); return; }
+      // Only allow click on current stage (here we simulate Dept action)
+      approveStageV(it, it.currentStage);
+      saveV(arr); renderVoucherTable();
+    }
 
-      const voucher={
-        id: Date.now(),
-        date,
-        amount,
-        claimNo: claim
-      };
-      const arr=loadVouchers();
-      arr.push(voucher);
-      saveVouchers(arr);
+    function stageCellVoucher(item, stage){
+      const st=item.stages[stage];
+      const isActive=item.currentStage===stage;
+      const statusText=st.status;
+      let cls='s-pending'; if(statusText==='Approved') cls='s-approved';
+      const updated = st.updatedAt ? new Date(st.updatedAt).toLocaleString() : '—';
+      const btn = isActive ? ` <button class="btn-secondary" style="padding:4px 8px" onclick="manualApproveVoucher('${item.id}')">Approve</button>` : '';
+      return `<span class="${cls}">${statusText}</span>${btn}<span class="muted">Updated: ${updated}</span>`;
     }
 
     function renderVoucherTable(){
-      const tbody=document.querySelector('#voucher-table tbody');
-      const arr=loadVouchers();
-      if(!arr.length){
-        tbody.innerHTML = `<tr><td colspan="7" class="muted">No vouchers yet.</td></tr>`;
-        return;
-      }
-      tbody.innerHTML = arr.map((v, idx)=>`
-        <tr>
-          <td>${idx+1}</td>
-          <td>${v.date||'-'}</td>
-          <td>${v.claimNo||'-'}</td>
-          <td>${(v.amount||0).toFixed(2)}</td>
-          <td>-</td>
-          <td>-</td>
-          <td>-</td>
-        </tr>
-      `).join('');
+      const tbody=document.getElementById('voucherTbody'); if(!tbody) return;
+      let arr=loadV(); if(arr.length===0){ tbody.innerHTML='<tr class="empty"><td colspan="7">No vouchers yet.</td></tr>'; return; }
+      tbody.innerHTML='';
+      arr.forEach((item,i)=>{
+        const num=parseFloat((item.amount+'').replace(/[^0-9.]/g,''))||0;
+        const fmt=num.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${i+1}</td><td>${item.date||'-'}</td><td>${item.claimNo||'-'}</td><td>${fmt}</td>
+                      <td>${stageCellVoucher(item,'dept')}</td>
+                      <td>${stageCellVoucher(item,'finance')}</td>
+                      <td>${stageCellVoucher(item,'accountant')}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+    document.getElementById('voucherRefreshBtn')?.addEventListener('click', renderVoucherTable);
+    document.getElementById('voucherSeedBtn')?.addEventListener('click', ()=>{
+      addVoucher({ type:'purchase', date:new Date().toISOString().slice(0,10), amount:'5000', workorder:'', remarks:'Demo', claimNo:'X-PV-1', files:[] });
+      renderVoucherTable();
+      alert('Demo voucher added.');
+    });
+
+    /* File helpers for vouchers (enable showing uploaded links in reports later if needed) */
+    function fileInfoFromInput(inputEl, key){
+      const out=[]; if(!inputEl || !inputEl.files) return out;
+      for(const f of inputEl.files){ const url=URL.createObjectURL(f); out.push({name:f.name, urlKey:key}); sessionFileURLs[key]=(sessionFileURLs[key]||[]); sessionFileURLs[key].push(url); }
+      return out;
     }
 
-    /* Wire all forms */
-    wireForm('purchaseForm','Purchase voucher submitted!','page-upload', (f, claim)=>{
-      addVoucherFromForm(f, claim); renderVoucherTable();
-    });
-    wireForm('travelForm','Travel voucher submitted!','page-upload', (f, claim)=>{
-      addVoucherFromForm(f, claim); renderVoucherTable();
-    });
-    wireForm('cashForm','Cash voucher submitted!','page-upload', (f, claim)=>{
-      addVoucherFromForm(f, claim); renderVoucherTable();
-    });
-    wireForm('othersForm','Other voucher submitted!','page-upload', (f, claim)=>{
-      addVoucherFromForm(f, claim); renderVoucherTable();
-    });
-    wireForm('paymentForm','Payment request submitted!','page-payment', (f, claim)=>{
-      addPaymentRequestFromForm(f, claim);
-      showPage('page-payment-view');
-    });
+    /* Hook voucher forms → vouchers storage */
+    function wireVoucherFormPurchase(){
+      const f=document.getElementById('purchaseForm'); if(!f) return; updateClaimPreview(f);
+      f.addEventListener('submit',(e)=>{
+        e.preventDefault();
+        const seq=commitSeq('P'); const claim=formatClaim('P',seq);
+        f.querySelector('.claim').value=claim; f.querySelector('.claim-text').textContent=claim;
+        const files=fileInfoFromInput(document.getElementById('pv-file'), claim+'-pv');
+        addVoucher({ type:'purchase',
+          date:document.getElementById('pv-date').value, amount:document.getElementById('pv-amt').value,
+          workorder:document.getElementById('pv-wo').value, remarks:document.getElementById('pv-remarks').value,
+          claimNo:claim, files });
+        alert(`Purchase voucher submitted!\nClaim No: ${claim}`);
+      });
+      f.addEventListener('reset',()=> setTimeout(()=> updateClaimPreview(f),0));
+    }
+    function wireVoucherFormTravel(){
+      const f=document.getElementById('travelForm'); if(!f) return; updateClaimPreview(f);
+      f.addEventListener('submit',(e)=>{
+        e.preventDefault();
+        const seq=commitSeq('T'); const claim=formatClaim('T',seq);
+        f.querySelector('.claim').value=claim; f.querySelector('.claim-text').textContent=claim;
+        const total=(travelTotals.fare+travelTotals.local+travelTotals.hotel+travelTotals.da+travelTotals.misc).toFixed(2);
+        const files=[...fileInfoFromInput(document.getElementById('fare-file'), claim+'-fare'),
+                     ...fileInfoFromInput(document.getElementById('hotel-file'), claim+'-hotel'),
+                     ...fileInfoFromInput(document.getElementById('misc-file'), claim+'-misc')];
+        addVoucher({ type:'travel',
+          date:document.getElementById('tv-date').value, amount:String(total),
+          workorder:document.getElementById('tv-wo').value, remarks:'', claimNo:claim, files });
+        alert(`Travel voucher submitted!\nClaim No: ${claim}`);
+      });
+      f.addEventListener('reset',()=> setTimeout(()=>{ updateClaimPreview(f); clearTravelTotals(); },0));
+    }
+    function wireVoucherFormOthers(){
+      const f=document.getElementById('othersForm'); if(!f) return; updateClaimPreview(f);
+      f.addEventListener('submit',(e)=>{
+        e.preventDefault();
+        const seq=commitSeq('O'); const claim=formatClaim('O',seq);
+        f.querySelector('.claim').value=claim; f.querySelector('.claim-text').textContent=claim;
+        const files=fileInfoFromInput(document.getElementById('ov-file'), claim+'-ov');
+        addVoucher({ type:'others',
+          date:document.getElementById('ov-date').value, amount:document.getElementById('ov-amt').value,
+          workorder:document.getElementById('ov-wo').value, remarks:document.getElementById('ov-remarks').value,
+          claimNo:claim, files });
+        alert(`Other voucher submitted!\nClaim No: ${claim}`);
+      });
+      f.addEventListener('reset',()=> setTimeout(()=> updateClaimPreview(f),0));
+    }
+    wireVoucherFormPurchase();
+    wireVoucherFormTravel();
+    wireVoucherFormOthers();
 
-    /* Keep claims in sync if body data-username is updated dynamically */
-    const unameObserver=new MutationObserver(updateAllClaims);
-    unameObserver.observe(document.body,{attributes:true,attributeFilter:['data-username']});
+    /* Cash Voucher items + save to vouchers */
+    (function initCashForm(){
+      const f = document.getElementById('cashForm'); if(!f) return;
+      f._items = [];
+      const dateEl = document.getElementById('cash-date');
+      const partEl = document.getElementById('cash-particulars');
+      const headEl = document.getElementById('cash-head');
+      const amtEl  = document.getElementById('cash-amount');
+      const tbody  = document.getElementById('cashItemsBody');
+      const totalEl= document.getElementById('cashTotal');
+      const hidden = document.getElementById('cashTotalInput');
+
+      (function sortHeadOptionsByLength(){
+        const all = Array.from(headEl.querySelectorAll('option'));
+        const placeholder = all.find(o => o.disabled || o.value==='');
+        const opts = all.filter(o => o !== placeholder);
+        opts.sort((a,b) => { const la=a.textContent.trim().length, lb=b.textContent.trim().length; return la!==lb? la-lb : a.textContent.localeCompare(b.textContent); });
+        headEl.innerHTML = ''; if (placeholder) headEl.appendChild(placeholder); opts.forEach(o => headEl.appendChild(o)); headEl.value='';
+      })();
+
+      function render(){
+        if(!f._items.length){
+          tbody.innerHTML = `<tr><td colspan="4" class="muted">No items added.</td></tr>`;
+        }else{
+          tbody.innerHTML = f._items.map(it => `
+            <tr>
+              <td>${it.date}</td><td>${it.part}</td><td>${it.head}</td><td class="right">${it.amount.toFixed(2)}</td>
+            </tr>`).join('');
+        }
+        const sum = f._items.reduce((s,i)=> s + i.amount, 0);
+        totalEl.textContent = sum.toFixed(2);
+        hidden.value = sum.toFixed(2);
+      }
+      tbody.addEventListener('beforeinput', e => e.preventDefault());
+      tbody.addEventListener('keydown', e => {
+        if (!['Tab','Shift','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)) e.preventDefault();
+      });
+
+      function addCurrentIfValid(){
+        const d=dateEl.value, part=(partEl.value||'').trim(), head=headEl.value||'', amt=parseFloat(amtEl.value||'0');
+        if(!d || !part || !head || !(amt>0)) return false;
+        f._items.push({ date:d, part, head, amount:amt }); render(); return true;
+      }
+      function addVoucherFromCash(){
+        const seq=commitSeq('C'); const claim=formatClaim('C', seq);
+        const total = parseFloat(hidden.value || '0') || 0;
+        addVoucher({ type:'cash', date: dateEl.value || '', amount: String(total), workorder:'', remarks:partEl.value||'', claimNo:claim, files:[] });
+        alert(`Cash voucher submitted!\nClaim No: ${claim}`);
+      }
+      render();
+      f.addEventListener('submit', (e)=>{
+        e.preventDefault();
+        if(f._items.length===0){ addCurrentIfValid(); }
+        render(); addVoucherFromCash(); f.reset(); f._items=[]; render();
+      });
+    })();
+
+    /* Submit Payment Request events */
+    const prForm=document.getElementById('paymentForm');
+    if(prForm){
+      updateClaimPreview(prForm);
+      prForm.addEventListener('submit',(e)=>{
+        e.preventDefault();
+        const seq=commitSeq('PR'); const claim=formatClaim('PR', seq);
+        prForm.querySelector('#pr-claim').value=claim; prForm.querySelector('.claim-text').textContent=claim;
+        addPaymentRequest({date:document.getElementById('pr-date').value, amount:document.getElementById('pr-amount').value, claimNo:claim});
+        alert(`Payment request submitted!\nClaim No: ${claim}`);
+      });
+      prForm.addEventListener('reset',()=> setTimeout(()=> updateClaimPreview(prForm),0));
+    }
+
+    /* Seed / render on load for visible page */
+    document.querySelectorAll('.page.active form').forEach(updateClaimPreview);
   </script>
 </body>
 </html>
