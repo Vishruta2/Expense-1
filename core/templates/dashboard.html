@@ -186,9 +186,10 @@
   <script>
     document.addEventListener('DOMContentLoaded', async () => {
       try{
-        const res = await fetch('/api/auth/me/');
+        const res = await fetch('/api/auth/me/', { credentials: 'include' });
         const me = await res.json();
-        const isAdmin = String(me?.designation||'').toLowerCase().includes('admin');
+        const roleStr = String(me?.designation||me?.role||'');
+        const isAdmin = (roleStr.toLowerCase().includes('admin')) || (me?.is_admin === true) || (Number(me?.approve_seq||0) === 4);
         const wrap = document.getElementById('adminEditWrap');
         const btn = document.getElementById('btnAdminEdit');
         const menu = document.getElementById('adminEditMenu');
@@ -208,7 +209,7 @@
 </script>
 
 
-  <!-- Work Order Overlay (Department Head only) -->
+  <!-- Work Order Overlay (Admin only) -->
   <div id="workOrderOverlay" class="modal-overlay" aria-hidden="true">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="workOrderTitle">
       <div class="modal-head">
@@ -250,14 +251,14 @@
   </div>
 
   <script>
-    // Show button only for Department Head and wire actions
+    // Show button only for Admin and wire actions
     (function(){
-      async function setupDeptHeadUI(){
+      async function setupAdminWorkOrderUI(){
         try{
           const res = await fetch('/api/auth/me/');
           const j = await res.json().catch(()=>({}));
           const role = (j && j.designation ? String(j.designation) : '').toLowerCase();
-          if(role.includes('department') && role.includes('head')){
+          if(role.includes('admin')){
             const btn = document.getElementById('btnWorkOrder');
             if(btn){
               btn.style.display = 'inline-flex';
@@ -345,7 +346,7 @@
           }catch(err){ alert('Failed to save: ' + (err?.message||err)); }
         });
       }
-      setupDeptHeadUI();
+      setupAdminWorkOrderUI();
     })();
   
   function byId(id){ return document.getElementById(id); }
@@ -494,7 +495,7 @@
             <button class="btn-ghost" data-home>← Back to Home</button>
             <h2 style="margin:0">Validate Voucher</h2>
             <div class="summary" id="summary" style="margin-left:auto;">
-              Approved: 0 | Deemed Approve: 0 | Rejected: 0
+              Approved: 0 | Deemed Approved: 0 | Rejected: 0
             </div>
           </div>
           <div class="table-wrap">
@@ -533,7 +534,8 @@
       <!-- Filled dynamically -->
       <div class="uv-help">Loading details…</div>
     </div>
-    <div class="uv-nav" style="justify-content:flex-start; gap:12px; margin-top:12px;">
+    <input type="hidden" id="decisionVoucherId" />
+    <div id="decisionControls" class="uv-nav" style="justify-content:flex-start; gap:12px; margin-top:12px;">
       <label><input type="radio" name="decision" value="approve"> Approve</label>
       <label style="margin-left:12px;"><input type="radio" name="decision" value="reject"> Reject</label>
       <button id="decisionSubmitBtn" class="uv-btn primary" onclick="submitDecision()">Submit</button>
@@ -3807,18 +3809,27 @@ async function submitPurchaseFromJson(voucherJson, purchaseJson, fileObj = null)
     updateAction('Rejected','s-rejected', remarks);
     closeOverlay('rejectModal');
   };
+  window.validateSummaryStats = {approved:0, deemed:0, rejected:0};
   window.updateAction = function(status, cls, remarks=''){
     const row = document.querySelector('#approveTable tbody tr'); if(!row) return;
     row.cells[8].innerHTML = `<span class="${cls}">${status}</span>`;
     row.cells[9].textContent = remarks;
     if(typeof updateSummary==='function') updateSummary();
   };
-  window.updateSummary = function(){
-    const rows=document.querySelectorAll('#approveTable tbody tr');
-    let approved=0, rejected=0;
-    rows.forEach(r=>{ const s=(r.cells[8]?.innerText||'').trim(); if(s==='Approved') approved++; if(s==='Rejected') rejected++; });
-    const deemed = rows.length - approved - rejected;
-    const el=document.getElementById('summary'); if(el) el.textContent = `Approved: ${approved} | Deemed Approve: ${deemed} | Rejected: ${rejected}`;
+  window.updateSummary = function(stats){
+    if(stats && typeof stats === 'object'){
+      const approved = Number(stats.approved || 0);
+      const deemed = Number(stats.deemed || 0);
+      const rejected = Number(stats.rejected || 0);
+      window.validateSummaryStats = {approved, deemed, rejected};
+    } else if(typeof window.validateSummaryStats !== 'object'){
+      window.validateSummaryStats = {approved:0, deemed:0, rejected:0};
+    }
+    const current = window.validateSummaryStats || {approved:0, deemed:0, rejected:0};
+    const el=document.getElementById('summary');
+    if(el){
+      el.textContent = `Approved: ${current.approved} | Deemed Approved: ${current.deemed} | Rejected: ${current.rejected}`;
+    }
   };
 
   // Kick a re-render if user is already on voucher page
@@ -3850,11 +3861,17 @@ async function submitPurchaseFromJson(voucherJson, purchaseJson, fileObj = null)
 <script>
 (function(){
   // When "Validate Voucher" tab is activated, load data
-  function renderValidateTable(rows){
+  function renderValidateTable(rows, stats){
     const tbody = document.querySelector('#approveTable tbody');
     if(!tbody) return;
+    const summaryStats = (stats && typeof stats === 'object') ? {
+      approved: Number(stats.approved || 0),
+      deemed: Number(stats.deemed || 0),
+      rejected: Number(stats.rejected || 0)
+    } : null;
     if(!Array.isArray(rows) || rows.length===0){
       tbody.innerHTML = '<tr class="empty"><td colspan="10">No vouchers pending for you.</td></tr>';
+      if(typeof updateSummary==='function') updateSummary(summaryStats || {approved:0, deemed:0, rejected:0});
       return;
     }
     tbody.innerHTML = rows.map((r, i) => {
@@ -3892,89 +3909,16 @@ async function submitPurchaseFromJson(voucherJson, purchaseJson, fileObj = null)
     }).join('');
     // attach "Click here" handlers
     tbody.querySelectorAll('button[data-details]').forEach(btn=>{
-      btn.addEventListener('click', async (e)=>{
+      btn.addEventListener('click', (e)=>{
+        e.preventDefault();
         const id = btn.getAttribute('data-details');
-        try{
-          const res = await fetch(`/api/validate/details/${encodeURIComponent(id)}/`, { headers: { 'Accept': 'application/json' } });
-          let js; let text; const ct=(res.headers.get('content-type')||'').toLowerCase();
-          if(ct.includes('application/json')){ js = await res.json(); }
-          else { text = await res.text(); throw new Error(text.slice(0,200)); }
-          if(!res.ok || !js.ok) throw new Error(js.error || `HTTP ${res.status}`);
-          // fill modal content
-          const d = js.data || {};
-          const box = document.getElementById('detailsContent');
-          if(box){
-            box.innerHTML = `
-              <div><b>Voucher:</b> ${d.voucher_no}</div>
-              <div><b>Expense Date:</b> ${d.expense_date||''}</div>
-              <div><b>Type:</b> ${d.voucher_type}</div>
-              <div><b>Work Order:</b> ${d.work_order}</div>
-              <div><b>Total:</b> ₹ ${(d.total_amount||0).toLocaleString(undefined,{minimumFractionDigits:2})}</div>
-              <div><b>Employee:</b> ${d.employee_name||''}</div>
-              ${d.purchase ? `<div><b>Description:</b> ${d.purchase.description||''}</div>`:''}
-              ${d.purchase && d.purchase.bill_url ? `<div><b>Bill:</b> <a class=\"btn-secondary\" style=\"padding:2px 8px\" href=\"${d.purchase.bill_url}\" target=\"_blank\" rel=\"noopener\">View</a></div>`:''}
-              ${Array.isArray(d.items)? `<div style="margin-top:8px;"><b>Items:</b><ul>`+d.items.map(it=>`<li>${it.expense_type||'-'} — ₹ ${(it.amount||0).toLocaleString(undefined,{minimumFractionDigits:2})}</li>`).join('')+`</ul></div>`:''}
-              ${d.travel ? `<div style="margin-top:8px;"><b>Travel Summary:</b>
-                 <div>A: Fare — ₹ ${(d.travel.fare?.sum||0).toLocaleString(undefined,{minimumFractionDigits:2})}</div>
-                 <div>B: Local — ₹ ${(d.travel.local?.sum||0).toLocaleString(undefined,{minimumFractionDigits:2})}</div>
-                 <div>C: Hotel — ₹ ${(d.travel.hotel?.sum||0).toLocaleString(undefined,{minimumFractionDigits:2})}</div>
-                 <div>D: Food — ₹ ${(d.travel.food?.sum||0).toLocaleString(undefined,{minimumFractionDigits:2})}</div>
-                 <div>E: Misc — ₹ ${(d.travel.misc?.sum||0).toLocaleString(undefined,{minimumFractionDigits:2})}</div>
-              </div>`:''}
-            `;
-          }
-          // Re-render with cleaner layout (override above)
-          try{
-            const money = n => Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-            const trimId = s => (s||'').replace(/(\d{4})$/,'');
-            const chip = (t,v)=>`<div style="display:flex;flex-direction:column;gap:2px;padding:10px;border:1px solid #e5e7eb;border-radius:10px;background:#f9fafb"><div style="font-size:12px;color:#64748b">${t}</div><div style="font-weight:700">${v}</div></div>`;
-            const section = (title, inner)=>`<div style="margin-top:12px"><div style="font-weight:800;margin-bottom:6px">${title}</div><div>${inner}</div></div>`;
-            const list = (rows)=>`<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px">Particulars</th><th style="text-align:right;border-bottom:1px solid #e5e7eb;padding:6px">Amount</th><th style="padding:6px"></th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
-            const btn = (href, label)=>`<a class="btn-secondary" style="padding:4px 8px" target="_blank" rel="noopener" href="${href}">${label}</a>`;
-            const d = js.data || {};
-            let itemsRows = [];
-            if(Array.isArray(d.items)){
-              itemsRows = d.items.map(it=>`<tr><td style=\"padding:6px;border-bottom:1px solid #f1f5f9\">${it.expense_type||'-'}</td><td style=\"padding:6px;text-align:right;border-bottom:1px solid #f1f5f9\">${money(it.amount)}</td><td style=\"padding:6px\">${it.file_url?btn(it.file_url,'View'):''}</td></tr>`);
-            }
-            const collect = (arr)=> (Array.isArray(arr)?arr:[]).map((x,i)=>x.file_url?btn(x.file_url,`View ${i+1}`):'').filter(Boolean).join(' ');
-            const travelFiles = d.travel ? [
-              d.travel.fare?.rows?.length? chip('A. Fare', money(d.travel.fare.sum||0)) + '<div style=\"margin-top:6px\">'+collect(d.travel.fare.rows)+'</div>' : '',
-              d.travel.local?.rows?.length? chip('B. Local', money(d.travel.local.sum||0)) + '<div style=\"margin-top:6px\">'+collect(d.travel.local.rows)+'</div>' : '',
-              d.travel.hotel?.rows?.length? chip('C. Hotel', money(d.travel.hotel.sum||0)) + '<div style=\"margin-top:6px\">'+collect(d.travel.hotel.rows)+'</div>' : '',
-              d.travel.food?.sum? chip('D. Food', money(d.travel.food.sum||0)) : '',
-              d.travel.misc?.rows?.length? chip('E. Misc', money(d.travel.misc.sum||0)) + '<div style=\"margin-top:6px\">'+collect(d.travel.misc.rows)+'</div>' : '',
-            ].filter(Boolean).join('') : '';
-            box.innerHTML = `
-              <div style=\"display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:8px\">
-                ${chip('Voucher', trimId(d.voucher_no||''))}
-                ${chip('Type', d.voucher_type||'-')}
-                ${chip('Expense Date', d.expense_date||'-')}
-                ${chip('Work Order', d.work_order||'-')}
-                ${chip('Total', '₹ '+money(d.total_amount||0))}
-                ${chip('Employee', d.employee_name||'-')}
-              </div>
-              ${d.purchase? section('Purchase', `
-                 <div style=\\"display:flex;justify-content:space-between;align-items:center;padding:10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff\\"> 
-                   <div>${d.purchase.description||''}</div>
-                   <div>${d.purchase.bill_url?btn(d.purchase.bill_url,'View Bill'):''}</div>
-                 </div>
-              `):''}
-              ${itemsRows.length? section('Expense Items', list(itemsRows)) : ''}
-              ${d.travel? section('Travel', travelFiles || '<div class=\\"muted\\">No travel bills attached.</div>') : ''}
-            `;
-          }catch(_){ /* leave basic content */ }
-          const m=document.getElementById('detailsModal');
-          if(m){
-            m.dataset.voucher = id;
-            m.querySelectorAll('input[name="decision"]').forEach(inp=>{ inp.checked=false; inp.disabled=false; });
-            const btn = document.getElementById('decisionSubmitBtn'); if(btn) btn.disabled = false;
-            m.classList.add('active');
-          }
-        }catch(err){
-          alert('Failed to load details: '+ err.message);
+        if(id){
+          try{ openDetailsModal(id); }
+          catch(err){ alert('Failed to open details: '+ (err?.message||err)); }
         }
       });
     });
+    if(typeof updateSummary==='function') updateSummary(summaryStats || {approved:0, deemed:0, rejected:0});
   }
 
   async function loadValidateList(){
@@ -3982,11 +3926,10 @@ async function submitPurchaseFromJson(voucherJson, purchaseJson, fileObj = null)
       const res = await fetch('/api/validate/list/');
       const js  = await res.json();
       if(!res.ok || !js.ok){ throw new Error(js.error || `HTTP ${res.status}`); }
-      renderValidateTable(js.data || []);
-      if(typeof updateSummary==='function') updateSummary(); // reuse your summary bar logic
+      renderValidateTable(js.data || [], js.stats || null);
     }catch(err){
       console.error(err);
-      renderValidateTable([]);
+      renderValidateTable([], null);
     }
   }
 
@@ -4150,6 +4093,82 @@ document.addEventListener('click', async (ev)=>{
 })();
 
   function byId(id){ return document.getElementById(id); }
+</script>
+
+
+<script>
+// --- Voucher ID Plumbing + Decision Submit Fix ---
+(function(){
+  // Shim fetch to capture voucher_id when details are fetched
+  const _origFetch = window.fetch;
+  window.fetch = function(input, init){
+    try{
+      const url = (typeof input === 'string') ? input : (input && input.url) || '';
+      const m = url && url.match(/\/validate\/details\/([^\/]+)\/?$/);
+      if (m && m[1]) {
+        const vid = decodeURIComponent(m[1]);
+        const hid = document.getElementById('decisionVoucherId');
+        if (hid) hid.value = vid;
+        const modal = document.getElementById('detailsModal');
+        if (modal) modal.dataset.voucherId = vid;
+      }
+    }catch(_e){ /* silent */ }
+    return _origFetch.apply(this, arguments);
+  };
+
+  // Helper: get CSRF token if needed (Django)
+  function getCsrf(){
+    try{
+      const m = document.cookie.match(/csrftoken=([^;]+)/);
+      return m ? m[1] : null;
+    }catch(_){ return null; }
+  }
+
+  // Override submitDecision to always include voucher_id
+  window.submitDecision = async function(){
+    try{
+      const voucherId = document.getElementById('decisionVoucherId')?.value || document.getElementById('detailsModal')?.dataset?.voucherId || '';
+      const decisionEl = document.querySelector('input[name="decision"]:checked');
+      const decision = decisionEl ? decisionEl.value : '';
+      // If a separate reject remarks modal is used, read from there; else from any remarks area in details
+      const remarksEl = document.getElementById('rejectRemarks') || document.getElementById('remarksInput') || document.querySelector('#detailsContent textarea[name="remarks"]');
+      const remarks = (remarksEl && (remarksEl.value||'').trim()) || '';
+
+      if (!voucherId) { alert('Missing voucher id'); return; }
+      if (!decision)  { alert('Please choose Approve or Reject'); return; }
+      if (decision === 'reject' && remarks.length < 1) {
+        // keep it lenient; your separate modal already enforces 50 chars if needed
+        // alert('Please enter remarks for rejection');
+        // return;
+      }
+
+      const payload = { voucher_id: voucherId, decision, remarks };
+      const headers = { 'Content-Type': 'application/json' };
+      const csrf = getCsrf();
+      if (csrf) headers['X-CSRFToken'] = csrf;
+
+      const res = await fetch('/validate/decision/', {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(payload)
+      });
+      const j = await res.json().catch(()=>({ ok:false, error:'Invalid server response' }));
+      if (!res.ok || j.ok === false) {
+        alert('Failed to save decision: ' + (j.error || ('HTTP '+res.status)));
+        return;
+      }
+      alert('Decision saved.');
+      // Close modals if open
+      try { window.closeOverlay && window.closeOverlay('detailsModal'); } catch(_){}
+      try { window.closeOverlay && window.closeOverlay('rejectModal'); } catch(_){}
+      // Optionally reload lists
+      try { window.reloadValidateList && window.reloadValidateList(); } catch(_){}
+    }catch(err){
+      alert('Unexpected error: ' + (err && err.message ? err.message : err));
+    }
+  };
+})();
 </script>
 
 </body>
@@ -4608,6 +4627,7 @@ document.addEventListener('click', async (ev)=>{
 
   async function fetchVoucherDetails(vno){
     const tryUrls = [
+      `/api/validate/details/${encodeURIComponent(vno)}/`,
       `/api/vouchers/${encodeURIComponent(vno)}/details/validate/`,
       `/api/vouchers/details/${encodeURIComponent(vno)}/`,
       `/api/voucher/details/${encodeURIComponent(vno)}/`
@@ -4615,9 +4635,103 @@ document.addEventListener('click', async (ev)=>{
     for(const url of tryUrls){
       try{
         const r = await fetch(url, {credentials:'include'});
-        if(r.ok){
-          return await r.json();
+        if(!r.ok) continue;
+        const js = await r.json();
+        // Normalize {ok:true,data:{...}} into the richer shape expected by the renderer
+        if(js && js.ok === true && js.data){
+          const d = js.data;
+          const base = {
+            voucher: {
+              voucher_no: vno,
+              voucher_type: (d.voucher_type || '').toUpperCase(),
+              work_order_no: d.work_order || d.work_order_no || '',
+              upload_date: d.upload_date || '',
+              expense_date: d.expense_date || '',
+              total_amount: d.total_amount || 0,
+            },
+            attachments: [],
+          };
+          if(base.voucher.voucher_type === 'PURCHASE'){
+            const f = { type:'bill', item_id: 1, filename: 'Bill', url: (d.purchase && d.purchase.bill_url) || '' };
+            return { ...base, voucher: { ...base.voucher, description: (d.purchase && d.purchase.description) || '' }, attachments: f.url ? [f] : [] };
+          }
+          if(base.voucher.voucher_type === 'EXPENSE'){
+            const files = Array.isArray(d.items) ? d.items.map((it, i)=>({ type:'bill', item_id:(i+1), filename: it.expense_type || `bill_${i+1}`, url: it.file_url })) : [];
+            return { ...base, attachments: files };
+          }
+          if(base.voucher.voucher_type === 'TRAVEL'){
+            const tr = d.travel || {};
+            const header = d.travel_header || {};
+            const sec = { fare: [], local: [], hotel: [], da: [], misc: [] };
+            const tot = { fare: 0, local: 0, hotel: 0, da: 0, misc: 0 };
+            if(Array.isArray(tr.fare?.rows)){
+              sec.fare = tr.fare.rows.map(r=>({
+                from_place: r.from_place, to_place: r.to_place,
+                departure_date: r.departure_date, departure_time: r.departure_time,
+                arrival_date: r.arrival_date, arrival_time: r.arrival_time,
+                mode_transport: r.mode_transport,
+                cost: r.amount, amount: r.amount,
+                files: r.file_url ? [{url: r.file_url, filename: 'Bill'}] : []
+              }));
+              tot.fare = Number(tr.fare.sum||0);
+            }
+            if(Array.isArray(tr.local?.rows)){
+              sec.local = tr.local.rows.map(r=>({
+                date: r.date,
+                from: r.from, to: r.to,
+                mode_transport: r.mode_transport, km: r.km,
+                cost: r.amount, amount: r.amount,
+                files: r.file_url ? [{url: r.file_url, filename: 'Bill'}] : []
+              }));
+              tot.local = Number(tr.local.sum||0);
+            }
+            if(Array.isArray(tr.hotel?.rows)){
+              sec.hotel = tr.hotel.rows.map(r=>({
+                checkin_date: r.checkin_date, checkout_date: r.checkout_date,
+                hotel_name: r.hotel_name, address: r.address,
+                cost: r.amount, amount: r.amount,
+                files: r.file_url ? [{url: r.file_url, filename: 'Bill'}] : []
+              }));
+              tot.hotel = Number(tr.hotel.sum||0);
+            }
+            if(Array.isArray(tr.food?.rows)){
+              sec.da = tr.food.rows.map(r=>({
+                from_date: r.from_date, to_date: r.to_date, number_days: r.days,
+                cost: r.amount, amount: r.amount,
+              }));
+              tot.da = Number(tr.food.sum||0);
+            }
+            if(Array.isArray(tr.misc?.rows)){
+              sec.misc = tr.misc.rows.map(r=>({
+                date: r.date, particulars: r.particulars,
+                cost: r.amount, amount: r.amount,
+                files: r.file_url ? [{url: r.file_url, filename: 'Bill'}] : []
+              }));
+              tot.misc = Number(tr.misc.sum||0);
+            }
+            const grand_total = ['fare','local','hotel','da','misc'].reduce((s,k)=> s + Number(tot[k]||0), 0);
+            return {
+              voucher: {
+                ...base.voucher,
+                employee: { name: d.employee_name || '' },
+                work_order_no: base.voucher.work_order_no,
+              },
+              travel: {
+                from_date: header.from_date || '',
+                to_date: header.to_date || '',
+                place_visit: header.place_visit || header.place || '',
+                purpose_journey: header.purpose_journey || '',
+                visit_authorized: { name: header.visit_authorised || '' },
+              },
+              sections: sec,
+              totals: { ...tot, grand_total },
+              attachments: [],
+            };
+          }
+          return base; // Fallback
         }
+        // If server already returns the rich shape, use it as is
+        return js;
       }catch(e){}
     }
     // last resort: look into localStorage (created from the "Voucher" page demo)
@@ -4798,6 +4912,15 @@ document.addEventListener('click', async (ev)=>{
 
   window.openDetailsModal = async function(voucherNo){
     try{
+      setDetailsTitle('Voucher Details');
+      resetDetailsActions();
+      setDecisionVisibility(true);
+      const modal = document.getElementById('detailsModal');
+      if(modal){
+        modal.dataset.voucher = voucherNo;        // <-- set it for submitDecision()
+        const hid = document.getElementById('decision_voucher_id');
+        if (hid) hid.value = voucherNo;
+      }
       openOverlay('detailsModal');
       const content = byId('detailsContent');
       if(content) content.innerHTML = `<div class="uv-help">Loading details…</div>`;
@@ -4863,110 +4986,980 @@ document.addEventListener('click', async (ev)=>{
     }
   };
 
-  function input(name, label, type='text', value=''){
-    return `<div class="form-row"><label>${label}</label><input name="${name}" type="${type}" value="${(value||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}"/></div>`;
+  function setDetailsTitle(text){
+    const modal = document.getElementById('detailsModal');
+    if(!modal) return;
+    const titleEl = modal.querySelector('.modal-title');
+    if(titleEl) titleEl.textContent = text || 'Voucher Details';
+  }
+  function resetDetailsActions(){
+    const actions = document.getElementById('detailsActions');
+    if(actions) actions.innerHTML = '';
+  }
+  function setDecisionVisibility(show){
+    const wrap = document.getElementById('decisionControls');
+    if(wrap){
+      wrap.style.display = show ? 'flex' : 'none';
+    }
+    document.querySelectorAll('#detailsModal input[name="decision"]').forEach(inp=>{
+      inp.checked = false;
+      inp.disabled = !show;
+    });
+    const btn = document.getElementById('decisionSubmitBtn');
+    if(btn){ btn.disabled = !show; }
   }
   async function openWorkOrderEditor(){
+    setDetailsTitle('Work Order Add / Update');
+    resetDetailsActions();
+    setDecisionVisibility(false);
+    const modal = document.getElementById('detailsModal');
+    if(modal){
+      delete modal.dataset.voucher;
+    }
+    const content = byId('detailsContent');
+    if(content){
+      content.innerHTML = `<div class="uv-wrap"><h3>Work Order Maintenance</h3>
+        <div id="wo_message" class="uv-help" style="display:none;"></div>
+        <form id="woForm" class="form">
+          <div class="form-row">
+            <label for="wo_selector">Work Order</label>
+            <select id="wo_selector">
+              <option value="__new__">＋ Create New Work Order</option>
+            </select>
+            <small class="muted">Select an existing work order to edit or choose the first option to create a new one.</small>
+          </div>
+          <input type="hidden" id="wo_project_id">
+          <div class="form-row"><label for="wo_work_order_no">Work Order No</label>
+            <input type="text" id="wo_work_order_no" required></div>
+          <div class="form-row"><label for="wo_project_name">Project Name</label>
+            <input type="text" id="wo_project_name" required></div>
+          <div class="form-row"><label for="wo_client_name">Client Name</label>
+            <input type="text" id="wo_client_name"></div>
+          <div class="form-row"><label for="wo_project_type">Project Type</label>
+            <input type="text" id="wo_project_type"></div>
+          <div class="form-row"><label for="wo_place">Place</label>
+            <input type="text" id="wo_place"></div>
+          <div class="form-row"><label for="wo_address">Address</label>
+            <textarea id="wo_address" rows="2" style="width:min(100%, var(--field-max));"></textarea></div>
+          <div class="form-row"><label for="wo_dept_id">Department ID</label>
+            <input type="number" id="wo_dept_id"></div>
+          <div class="form-row"><label for="wo_status">Status</label>
+            <select id="wo_status">
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+            </select>
+          </div>
+          <div class="form-actions" style="justify-content:flex-start">
+            <button type="submit" class="btn-primary">Save Work Order</button>
+          </div>
+        </form>
+      </div>`;
+    }
     openOverlay('detailsModal');
-    byId('detailsContent').innerHTML = '';
+    const root = byId('detailsContent');
+    if(!root) return;
+    const messageBox = root.querySelector('#wo_message');
+    const selector = root.querySelector('#wo_selector');
+    const fields = {
+      projectId: root.querySelector('#wo_project_id'),
+      workOrder: root.querySelector('#wo_work_order_no'),
+      projectName: root.querySelector('#wo_project_name'),
+      clientName: root.querySelector('#wo_client_name'),
+      projectType: root.querySelector('#wo_project_type'),
+      place: root.querySelector('#wo_place'),
+      address: root.querySelector('#wo_address'),
+      deptId: root.querySelector('#wo_dept_id'),
+      status: root.querySelector('#wo_status'),
+    };
+    const form = root.querySelector('#woForm');
 
-    const shell=document.createElement('div');
-    shell.innerHTML = `<div class="uv-wrap"><h3>Work Order Add/Update</h3>
-      <form id="woForm" class="form">
-        ${input('work_order_no','Work Order No')}
-        ${input('project_name','Project Name')}
-        ${input('client_name','Client Name')}
-        ${input('project_type','Project Type')}
-        ${input('place','Place')}
-        ${input('address','Address')}
-        ${input('dept_id','Department ID','number')}
-        ${input('status','Status')}
-        <div class="uv-nav" style="justify-content:flex-start"><button class="uv-btn primary" type="submit">Save</button></div>
-      </form></div>`;
-    byId('detailsContent').appendChild(shell);
+    const showMessage = (text, isError=false)=>{
+      if(!messageBox) return;
+      if(!text){
+        messageBox.style.display = 'none';
+        messageBox.textContent = '';
+        return;
+      }
+      messageBox.style.display = 'block';
+      messageBox.style.color = isError ? '#b91c1c' : '#256029';
+      messageBox.textContent = text;
+    };
 
-    byId('detailsContent').innerHTML = shell.innerHTML;
-    const form = byId('woForm');
-    form.addEventListener('submit', async (e)=>{
-      e.preventDefault(); const fd=new FormData(form); const data={}; fd.forEach((v,k)=>data[k]=v);
-      const res = await fetch('/api/projects/upsert/', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
-      const js = await res.json().catch(()=>({ok:false})); if(!res.ok||!js.ok){ alert('Failed: '+(js.error||res.status)); return; }
-      alert('Saved.');
-    });
+    const clearForm = ()=>{
+      if(fields.projectId) fields.projectId.value = '';
+      if(fields.workOrder) fields.workOrder.value = '';
+      if(fields.projectName) fields.projectName.value = '';
+      if(fields.clientName) fields.clientName.value = '';
+      if(fields.projectType) fields.projectType.value = '';
+      if(fields.place) fields.place.value = '';
+      if(fields.address) fields.address.value = '';
+      if(fields.deptId) fields.deptId.value = '';
+      if(fields.status) fields.status.value = 'Active';
+    };
+
+    const populateForm = (data={})=>{
+      if(fields.projectId) fields.projectId.value = data.project_id ? String(data.project_id) : '';
+      if(fields.workOrder) fields.workOrder.value = data.work_order_no || '';
+      if(fields.projectName) fields.projectName.value = data.project_name || '';
+      if(fields.clientName) fields.clientName.value = data.client_name || '';
+      if(fields.projectType) fields.projectType.value = data.project_type || '';
+      if(fields.place) fields.place.value = data.place || '';
+      if(fields.address) fields.address.value = data.address || '';
+      if(fields.deptId) fields.deptId.value = data.dept_id != null ? String(data.dept_id) : '';
+      if(fields.status){
+        const st = (data.status || '').toString().toLowerCase();
+        fields.status.value = st === 'inactive' ? 'Inactive' : 'Active';
+      }
+    };
+
+    const loadWorkOrders = async ()=>{
+      if(!selector) return;
+      const current = selector.value;
+      selector.innerHTML = '<option value="__new__">＋ Create New Work Order</option>';
+      try{
+        const res = await fetch('/api/projects/', {headers:{'Accept':'application/json'}});
+        const rows = await res.json().catch(()=>[]);
+        if(!res.ok){
+          throw new Error((rows && rows.error) || `HTTP ${res.status}`);
+        }
+        (rows || []).forEach(row=>{
+          if(!row) return;
+          const value = row.work_order_no || '';
+          if(!value) return;
+          const opt = document.createElement('option');
+          opt.value = value;
+          opt.textContent = row.project_name ? `${value} — ${row.project_name}` : value;
+          selector.appendChild(opt);
+        });
+        if(current && [...selector.options].some(o=>o.value===current)){
+          selector.value = current;
+        }else{
+          selector.value = '__new__';
+        }
+      }catch(err){
+        showMessage(`Unable to load work orders: ${err.message || err}`, true);
+      }
+    };
+
+    await loadWorkOrders();
+    clearForm();
+    showMessage('Select an existing work order to edit or create a new one.');
+
+    const loadDetails = async (wo)=>{
+      if(!wo) return;
+      showMessage(`Loading ${wo}…`);
+      try{
+        const res = await fetch(`/api/projects/details/${encodeURIComponent(wo)}/`, {headers:{'Accept':'application/json'}});
+        if(!res.ok){
+          throw new Error(res.status === 404 ? 'Work order not found.' : `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        populateForm(data);
+        showMessage(`Loaded ${data.work_order_no || wo}.`);
+      }catch(err){
+        clearForm();
+        showMessage(`Failed to load work order: ${err.message || err}`, true);
+      }
+    };
+
+    if(selector){
+      selector.addEventListener('change', ()=>{
+        const val = selector.value;
+        if(val && val !== '__new__'){
+          loadDetails(val);
+        }else{
+          clearForm();
+          showMessage('Creating a new work order.');
+        }
+      });
+    }
+
+    if(form){
+      form.addEventListener('submit', async (e)=>{
+        e.preventDefault();
+        const payload = {
+          project_id: fields.projectId && fields.projectId.value ? parseInt(fields.projectId.value, 10) || undefined : undefined,
+          work_order_no: (fields.workOrder?.value || '').trim(),
+          project_name: (fields.projectName?.value || '').trim(),
+          client_name: (fields.clientName?.value || '').trim(),
+          project_type: (fields.projectType?.value || '').trim(),
+          place: (fields.place?.value || '').trim(),
+          address: (fields.address?.value || '').trim(),
+          dept_id: fields.deptId && fields.deptId.value ? parseInt(fields.deptId.value, 10) || undefined : undefined,
+          status: fields.status?.value || 'Active',
+        };
+        if(!payload.work_order_no || !payload.project_name){
+          showMessage('Work Order No and Project Name are required.', true);
+          return;
+        }
+        if(!payload.client_name) delete payload.client_name;
+        if(!payload.project_type) delete payload.project_type;
+        if(!payload.place) delete payload.place;
+        if(!payload.address) delete payload.address;
+        if(!payload.dept_id) delete payload.dept_id;
+        if(!payload.project_id) delete payload.project_id;
+
+        showMessage('Saving work order…');
+        try{
+          const res = await fetch('/api/projects/upsert/', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(payload),
+          });
+          const js = await res.json().catch(()=>({}));
+          if(!res.ok || js.ok === false){
+            throw new Error(js.error || `HTTP ${res.status}`);
+          }
+          const savedId = js.data?.project_id;
+          if(fields.projectId && savedId){
+            fields.projectId.value = String(savedId);
+          }
+          showMessage(`Saved successfully${savedId ? ` (Project ID ${savedId})` : ''}.`);
+          await loadWorkOrders();
+          if(selector && payload.work_order_no && [...selector.options].some(o=>o.value===payload.work_order_no)){
+            selector.value = payload.work_order_no;
+          }
+        }catch(err){
+          showMessage(`Failed to save work order: ${err.message || err}`, true);
+        }
+      });
+    }
   }
   async function openEmployeeEditor(){
+    setDetailsTitle('Employee & Credentials');
+    resetDetailsActions();
+    setDecisionVisibility(false);
+    const modal = document.getElementById('detailsModal');
+    if(modal){
+      delete modal.dataset.voucher;
+    }
+    const content = byId('detailsContent');
+    if(content){
+      content.innerHTML = '<div class="uv-help">Loading employee tools…</div>';
+    }
     openOverlay('detailsModal');
-    byId('detailsContent').innerHTML = '';
 
-    const shell=document.createElement('div');
-    shell.innerHTML = `<div class="uv-wrap"><h3>Employee Add/Update</h3>
-      <form id="empForm" class="form">
-        ${input('emp_id','Emp ID (leave blank to add)','number')}
-        ${input('name','Name')}
-        ${input('age','Age','number')}
-        ${input('address','Address')}
-        ${input('contact','Contact','number')}
-        ${input('email_id','Email')}
-        ${input('dept_id','Dept ID','number')}
-        ${input('reporting_manager','Reporting Manager EmpID','number')}
-        ${input('authority','Authority')}
-        <h4>Credentials</h4>
-        ${input('username','Username')}
-        ${input('password','Password','password')}
-        ${input('role','Role')}
-        ${input('approve_seq','Approve Seq','number')}
-        <div class="uv-nav" style="justify-content:flex-start"><button class="uv-btn primary" type="submit">Save</button></div>
-      </form></div>`;
-    byId('detailsContent').appendChild(shell);
+    const AUTH_OPTIONS = ['Employee','Manager','Department Head','Accountant','Finance Head','Admin'];
+    let departments = [];
+    let employees = [];
+    let credentials = [];
+    const employeeMap = new Map();
+    const credentialMap = new Map();
 
-    byId('detailsContent').innerHTML = shell.innerHTML;
-    byId('empForm').addEventListener('submit', async (e)=>{
-      e.preventDefault(); const fd=new FormData(e.target); const data={}; fd.forEach((v,k)=>data[k]=v);
-      const res = await fetch('/api/admin/employee/upsert/', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
-      const js = await res.json().catch(()=>({ok:false})); if(!res.ok||!js.ok){ alert('Failed: '+(js.error||res.status)); return; }
-      alert('Saved employee '+js.data.emp_id);
-    });
+    const fetchData = async ()=>{
+      const [deptRes, empRes, credRes] = await Promise.all([
+        fetch('/api/admin/departments/', {headers:{'Accept':'application/json'}}),
+        fetch('/api/admin/employees/', {headers:{'Accept':'application/json'}}),
+        fetch('/api/admin/credentials/', {headers:{'Accept':'application/json'}})
+      ]);
+      const deptJson = await deptRes.json().catch(()=>({}));
+      const empJson = await empRes.json().catch(()=>({}));
+      const credJson = await credRes.json().catch(()=>({}));
+      if(!deptRes.ok){
+        throw new Error(deptJson.error || `HTTP ${deptRes.status}`);
+      }
+      if(!empRes.ok){
+        throw new Error(empJson.error || `HTTP ${empRes.status}`);
+      }
+      if(!credRes.ok){
+        throw new Error(credJson.error || `HTTP ${credRes.status}`);
+      }
+      departments = Array.isArray(deptJson) ? deptJson : [];
+      employees = Array.isArray(empJson) ? empJson.map(e=>{
+        const contact = e.contact != null ? String(e.contact) : '';
+        const credential = e.credential || {};
+        return {
+          emp_id: e.emp_id != null ? Number(e.emp_id) : null,
+          name: e.name || '',
+          age: e.age != null ? Number(e.age) : null,
+          address: e.address || '',
+          contact,
+          email_id: e.email_id || '',
+          dept_id: e.dept_id != null ? Number(e.dept_id) : null,
+          reporting_manager: e.reporting_manager != null ? Number(e.reporting_manager) : null,
+          authority: e.authority || '',
+          credential: {
+            cred_id: credential.cred_id != null ? Number(credential.cred_id) : null,
+            username: credential.username || '',
+            role: credential.role || '',
+            approve_seq: credential.approve_seq != null ? Number(credential.approve_seq) : 0
+          }
+        };
+      }) : [];
+      employeeMap.clear();
+      employees.forEach(emp=>{
+        if(emp.emp_id != null){
+          employeeMap.set(String(emp.emp_id), emp);
+        }
+      });
+      credentials = Array.isArray(credJson) ? credJson.map(c=>({
+        cred_id: c.cred_id != null ? Number(c.cred_id) : null,
+        emp_id: c.emp_id != null ? Number(c.emp_id) : null,
+        username: c.username || '',
+        role: c.role || '',
+        approve_seq: c.approve_seq != null ? Number(c.approve_seq) : 0
+      })) : [];
+      credentialMap.clear();
+      credentials.forEach(c=>{
+        if(c.cred_id != null){
+          credentialMap.set(String(c.cred_id), c);
+        }
+      });
+    };
+
+    try{
+      await fetchData();
+    }catch(err){
+      if(content){
+        content.innerHTML = `<div style="color:#b91c1c;">${esc(err.message || err)}</div>`;
+      }
+      return;
+    }
+
+    if(content){
+      content.innerHTML = `<div class="uv-wrap">
+        <h3>Employee Maintenance</h3>
+        <div id="emp_message" class="uv-help" style="display:none;"></div>
+        <form id="employeeForm" class="form" autocomplete="off">
+          <div class="form-row">
+            <label for="emp_mode">Action</label>
+            <select id="emp_mode">
+              <option value="add">Add Employee</option>
+              <option value="update">Update Employee</option>
+            </select>
+          </div>
+          <div class="form-row" id="emp_select_row" style="display:none;">
+            <label for="emp_select">Select Employee</label>
+            <select id="emp_select"><option value="">-- Select Employee --</option></select>
+          </div>
+          <input type="hidden" id="emp_id_field">
+          <div class="form-row"><label for="emp_name">Name</label>
+            <input type="text" id="emp_name" required></div>
+          <div class="form-row"><label for="emp_age">Age</label>
+            <input type="number" id="emp_age" min="0"></div>
+          <div class="form-row"><label for="emp_address">Address</label>
+            <textarea id="emp_address" rows="2" style="width:min(100%, var(--field-max));"></textarea></div>
+          <div class="form-row"><label for="emp_contact">Contact</label>
+            <input type="text" id="emp_contact"></div>
+          <div class="form-row"><label for="emp_email">Email</label>
+            <input type="email" id="emp_email"></div>
+          <div class="form-row"><label for="emp_dept">Department</label>
+            <select id="emp_dept"><option value="">-- Select Department --</option></select>
+          </div>
+          <div class="form-row"><label for="emp_reporting">Reporting Manager</label>
+            <select id="emp_reporting"><option value="">-- Select Manager --</option></select>
+          </div>
+          <div class="form-row"><label for="emp_authority">Authority</label>
+            <select id="emp_authority"></select>
+          </div>
+          <h4>Credentials</h4>
+          <div class="form-row"><label for="emp_username">Username</label>
+            <input type="text" id="emp_username" required></div>
+          <div class="form-row"><label for="emp_password">Password</label>
+            <input type="text" id="emp_password" placeholder="Leave blank to keep existing"></div>
+          <div class="form-row"><label for="emp_role">Role</label>
+            <select id="emp_role"></select>
+          </div>
+          <div class="form-row"><label for="emp_seq">Approve Sequence</label>
+            <select id="emp_seq"></select>
+          </div>
+          <div class="form-actions" style="justify-content:flex-start">
+            <button type="submit" class="btn-primary">Save Employee</button>
+          </div>
+        </form>
+        <h3 style="margin-top:24px;">Credentials Maintenance</h3>
+        <div id="cred_message" class="uv-help" style="display:none;"></div>
+        <form id="credForm" class="form" autocomplete="off">
+          <div class="form-row">
+            <label for="cred_mode">Action</label>
+            <select id="cred_mode">
+              <option value="add">Add Credentials</option>
+              <option value="update">Update Credentials</option>
+            </select>
+          </div>
+          <div class="form-row" id="cred_select_row" style="display:none;">
+            <label for="cred_select">Select Credentials</label>
+            <select id="cred_select"><option value="">-- Select Credentials --</option></select>
+          </div>
+          <div class="form-row"><label for="cred_employee">Employee</label>
+            <select id="cred_employee"><option value="">-- Select Employee --</option></select>
+          </div>
+          <div class="form-row"><label for="cred_username">Username</label>
+            <input type="text" id="cred_username" required></div>
+          <div class="form-row"><label for="cred_password">Password</label>
+            <input type="text" id="cred_password" placeholder="Leave blank to keep existing"></div>
+          <div class="form-row"><label for="cred_role">Role</label>
+            <select id="cred_role"></select>
+          </div>
+          <div class="form-row"><label for="cred_seq">Approve Sequence</label>
+            <select id="cred_seq"></select>
+          </div>
+          <div class="form-actions" style="justify-content:flex-start">
+            <button type="submit" class="btn-primary">Save Credentials</button>
+          </div>
+        </form>
+      </div>`;
+    }
+
+    const root = byId('detailsContent');
+    if(!root) return;
+
+    const empMessage = root.querySelector('#emp_message');
+    const credMessage = root.querySelector('#cred_message');
+    const employeeForm = root.querySelector('#employeeForm');
+    const credForm = root.querySelector('#credForm');
+    const empMode = root.querySelector('#emp_mode');
+    const empSelectRow = root.querySelector('#emp_select_row');
+    const empSelect = root.querySelector('#emp_select');
+    const empIdField = root.querySelector('#emp_id_field');
+    const empName = root.querySelector('#emp_name');
+    const empAge = root.querySelector('#emp_age');
+    const empAddress = root.querySelector('#emp_address');
+    const empContact = root.querySelector('#emp_contact');
+    const empEmail = root.querySelector('#emp_email');
+    const empDept = root.querySelector('#emp_dept');
+    const empReporting = root.querySelector('#emp_reporting');
+    const empAuthority = root.querySelector('#emp_authority');
+    const empUsername = root.querySelector('#emp_username');
+    const empPassword = root.querySelector('#emp_password');
+    const empRole = root.querySelector('#emp_role');
+    const empSeq = root.querySelector('#emp_seq');
+    const credMode = root.querySelector('#cred_mode');
+    const credSelectRow = root.querySelector('#cred_select_row');
+    const credSelect = root.querySelector('#cred_select');
+    const credEmployee = root.querySelector('#cred_employee');
+    const credUsername = root.querySelector('#cred_username');
+    const credPassword = root.querySelector('#cred_password');
+    const credRole = root.querySelector('#cred_role');
+    const credSeq = root.querySelector('#cred_seq');
+
+    const showEmpMessage = (text, isError=false)=>{
+      if(!empMessage) return;
+      if(!text){
+        empMessage.style.display = 'none';
+        empMessage.textContent = '';
+        return;
+      }
+      empMessage.style.display = 'block';
+      empMessage.style.color = isError ? '#b91c1c' : '#256029';
+      empMessage.textContent = text;
+    };
+
+    const showCredMessage = (text, isError=false)=>{
+      if(!credMessage) return;
+      if(!text){
+        credMessage.style.display = 'none';
+        credMessage.textContent = '';
+        return;
+      }
+      credMessage.style.display = 'block';
+      credMessage.style.color = isError ? '#b91c1c' : '#256029';
+      credMessage.textContent = text;
+    };
+
+    const populateAuthorityOptions = (select, allowBlank)=>{
+      if(!select) return;
+      const current = select.value;
+      select.innerHTML = '';
+      if(allowBlank){
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '-- Select --';
+        select.appendChild(opt);
+      }
+      AUTH_OPTIONS.forEach(label=>{
+        const opt = document.createElement('option');
+        opt.value = label;
+        opt.textContent = label;
+        select.appendChild(opt);
+      });
+      if(current && [...select.options].some(o=>o.value===current)){
+        select.value = current;
+      }else if(!allowBlank){
+        select.value = AUTH_OPTIONS[0];
+      }
+    };
+
+    const populateApproveSeq = (select)=>{
+      if(!select) return;
+      const current = select.value;
+      select.innerHTML = '';
+      for(let i=0;i<=4;i++){
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = String(i);
+        select.appendChild(opt);
+      }
+      if(current && [...select.options].some(o=>o.value===current)){
+        select.value = current;
+      }else{
+        select.value = '0';
+      }
+    };
+
+    populateAuthorityOptions(empAuthority, true);
+    populateAuthorityOptions(empRole, false);
+    populateAuthorityOptions(credRole, false);
+    populateApproveSeq(empSeq);
+    populateApproveSeq(credSeq);
+
+    const populateDepartments = ()=>{
+      if(!empDept) return;
+      const current = empDept.value;
+      empDept.innerHTML = '<option value="">-- Select Department --</option>';
+      departments.forEach(dep=>{
+        if(dep.dept_id == null) return;
+        const opt = document.createElement('option');
+        opt.value = String(dep.dept_id);
+        const label = dep.dept_name ? `${dep.dept_name} (${dep.dept_id})` : String(dep.dept_id);
+        opt.textContent = label;
+        empDept.appendChild(opt);
+      });
+      if(current && [...empDept.options].some(o=>o.value===current)){
+        empDept.value = current;
+      }
+    };
+
+    const populateManagers = ()=>{
+      if(!empReporting) return;
+      const current = empReporting.value;
+      empReporting.innerHTML = '<option value="">-- Select Manager --</option>';
+      employees.forEach(emp=>{
+        if(emp.emp_id == null) return;
+        const opt = document.createElement('option');
+        opt.value = String(emp.emp_id);
+        opt.textContent = emp.name ? `${emp.name} (#${emp.emp_id})` : `Employee #${emp.emp_id}`;
+        empReporting.appendChild(opt);
+      });
+      if(current && [...empReporting.options].some(o=>o.value===current)){
+        empReporting.value = current;
+      }
+    };
+
+    const populateEmployeeSelect = ()=>{
+      if(!empSelect) return;
+      const current = empSelect.value;
+      empSelect.innerHTML = '<option value="">-- Select Employee --</option>';
+      employees.forEach(emp=>{
+        if(emp.emp_id == null) return;
+        const opt = document.createElement('option');
+        opt.value = String(emp.emp_id);
+        opt.textContent = emp.name ? `${emp.name} (#${emp.emp_id})` : `Employee #${emp.emp_id}`;
+        empSelect.appendChild(opt);
+      });
+      if(current && [...empSelect.options].some(o=>o.value===current)){
+        empSelect.value = current;
+      }
+    };
+
+    const populateCredentialEmployee = ()=>{
+      if(!credEmployee) return;
+      const current = credEmployee.value;
+      credEmployee.innerHTML = '<option value="">-- Select Employee --</option>';
+      employees.forEach(emp=>{
+        if(emp.emp_id == null) return;
+        const opt = document.createElement('option');
+        opt.value = String(emp.emp_id);
+        opt.textContent = emp.name ? `${emp.name} (#${emp.emp_id})` : `Employee #${emp.emp_id}`;
+        credEmployee.appendChild(opt);
+      });
+      if(current && [...credEmployee.options].some(o=>o.value===current)){
+        credEmployee.value = current;
+      }
+    };
+
+    const populateCredentialSelect = ()=>{
+      if(!credSelect) return;
+      const current = credSelect.value;
+      credSelect.innerHTML = '<option value="">-- Select Credentials --</option>';
+      credentials.forEach(cred=>{
+        if(cred.cred_id == null) return;
+        const opt = document.createElement('option');
+        opt.value = String(cred.cred_id);
+        const empName = cred.emp_id != null ? (employeeMap.get(String(cred.emp_id))?.name || '') : '';
+        opt.textContent = cred.username ? `${cred.username}${empName ? ` (${empName})` : ''}` : `Credential #${cred.cred_id}`;
+        credSelect.appendChild(opt);
+      });
+      if(current && [...credSelect.options].some(o=>o.value===current)){
+        credSelect.value = current;
+      }
+    };
+
+    const populateAllSelects = (opts={})=>{
+      populateDepartments();
+      populateManagers();
+      populateEmployeeSelect();
+      populateCredentialEmployee();
+      populateCredentialSelect();
+      if(opts.selectedEmployee){
+        const sid = String(opts.selectedEmployee);
+        if(empSelect) empSelect.value = sid;
+        if(credEmployee) credEmployee.value = sid;
+      }
+      if(opts.selectedCredential && credSelect){
+        credSelect.value = String(opts.selectedCredential);
+      }
+    };
+
+    const fillEmployeeForm = (emp)=>{
+      if(!emp){
+        if(empIdField) empIdField.value = '';
+        if(empName) empName.value = '';
+        if(empAge) empAge.value = '';
+        if(empAddress) empAddress.value = '';
+        if(empContact) empContact.value = '';
+        if(empEmail) empEmail.value = '';
+        if(empDept) empDept.value = '';
+        if(empReporting) empReporting.value = '';
+        if(empAuthority) empAuthority.value = '';
+        if(empUsername) empUsername.value = '';
+        if(empPassword) empPassword.value = '';
+        if(empRole) empRole.value = AUTH_OPTIONS[0];
+        if(empSeq) empSeq.value = '0';
+        return;
+      }
+      if(empIdField) empIdField.value = emp.emp_id != null ? String(emp.emp_id) : '';
+      if(empName) empName.value = emp.name || '';
+      if(empAge) empAge.value = emp.age != null ? String(emp.age) : '';
+      if(empAddress) empAddress.value = emp.address || '';
+      if(empContact) empContact.value = emp.contact || '';
+      if(empEmail) empEmail.value = emp.email_id || '';
+      if(empDept) empDept.value = emp.dept_id != null ? String(emp.dept_id) : '';
+      if(empReporting) empReporting.value = emp.reporting_manager != null ? String(emp.reporting_manager) : '';
+      if(empAuthority) empAuthority.value = emp.authority || '';
+      if(empUsername) empUsername.value = emp.credential?.username || '';
+      if(empPassword) empPassword.value = '';
+      if(empRole) empRole.value = emp.credential?.role || AUTH_OPTIONS[0];
+      if(empSeq) empSeq.value = emp.credential?.approve_seq != null ? String(emp.credential.approve_seq) : '0';
+    };
+
+    const fillCredentialForm = (cred)=>{
+      if(!cred){
+        if(credEmployee) credEmployee.value = '';
+        if(credUsername) credUsername.value = '';
+        if(credPassword) credPassword.value = '';
+        if(credRole) credRole.value = AUTH_OPTIONS[0];
+        if(credSeq) credSeq.value = '0';
+        return;
+      }
+      if(credEmployee) credEmployee.value = cred.emp_id != null ? String(cred.emp_id) : '';
+      if(credUsername) credUsername.value = cred.username || '';
+      if(credPassword) credPassword.value = '';
+      if(credRole) credRole.value = cred.role || AUTH_OPTIONS[0];
+      if(credSeq) credSeq.value = cred.approve_seq != null ? String(cred.approve_seq) : '0';
+    };
+
+    populateAllSelects();
+    fillEmployeeForm(null);
+    fillCredentialForm(null);
+
+    const handleEmpModeChange = ()=>{
+      if(!empMode) return;
+      const mode = empMode.value;
+      if(empSelectRow){
+        empSelectRow.style.display = mode === 'update' ? '' : 'none';
+      }
+      if(mode === 'update'){
+        showEmpMessage('Select an employee to update.');
+        if(empSelect && !empSelect.value){
+          fillEmployeeForm(null);
+        }
+      }else{
+        showEmpMessage('');
+        if(empSelect) empSelect.value = '';
+        fillEmployeeForm(null);
+      }
+    };
+
+    const handleEmployeeSelect = ()=>{
+      if(!empSelect) return;
+      const emp = employeeMap.get(empSelect.value || '');
+      if(emp){
+        fillEmployeeForm(emp);
+        showEmpMessage(`Editing ${emp.name || 'Employee'} (#${emp.emp_id})`);
+      }else{
+        fillEmployeeForm(null);
+        showEmpMessage('');
+      }
+    };
+
+    const handleCredModeChange = ()=>{
+      if(!credMode) return;
+      const mode = credMode.value;
+      if(credSelectRow){
+        credSelectRow.style.display = mode === 'update' ? '' : 'none';
+      }
+      if(mode === 'update'){
+        showCredMessage('Select credentials to update.');
+        if(credSelect && !credSelect.value){
+          fillCredentialForm(null);
+        }
+      }else{
+        showCredMessage('');
+        if(credSelect) credSelect.value = '';
+        fillCredentialForm(null);
+      }
+    };
+
+    const handleCredentialSelect = ()=>{
+      if(!credSelect) return;
+      const cred = credentialMap.get(credSelect.value || '');
+      if(cred){
+        fillCredentialForm(cred);
+        showCredMessage(`Editing ${cred.username || 'credentials'} (#${cred.cred_id})`);
+      }else{
+        fillCredentialForm(null);
+        showCredMessage('');
+      }
+    };
+
+    if(empMode) empMode.addEventListener('change', handleEmpModeChange);
+    if(empSelect) empSelect.addEventListener('change', handleEmployeeSelect);
+    if(credMode) credMode.addEventListener('change', handleCredModeChange);
+    if(credSelect) credSelect.addEventListener('change', handleCredentialSelect);
+
+    handleEmpModeChange();
+    handleCredModeChange();
+
+    if(employeeForm){
+      employeeForm.addEventListener('submit', async (e)=>{
+        e.preventDefault();
+        const mode = empMode ? empMode.value : 'add';
+        const selectedId = empSelect ? empSelect.value : '';
+        if(mode === 'update' && !selectedId){
+          showEmpMessage('Select an employee to update.', true);
+          return;
+        }
+        const payload = {
+          emp_id: mode === 'update' && selectedId ? Number(selectedId) : undefined,
+          name: (empName?.value || '').trim(),
+          age: empAge && empAge.value ? Number(empAge.value) : undefined,
+          address: (empAddress?.value || '').trim(),
+          contact: (empContact?.value || '').trim(),
+          email_id: (empEmail?.value || '').trim(),
+          dept_id: empDept && empDept.value ? Number(empDept.value) : undefined,
+          reporting_manager: empReporting && empReporting.value ? Number(empReporting.value) : undefined,
+          authority: empAuthority?.value || '',
+          username: (empUsername?.value || '').trim(),
+          password: empPassword?.value || '',
+          role: empRole?.value || 'Employee',
+          approve_seq: empSeq && empSeq.value ? Number(empSeq.value) : 0
+        };
+        if(!payload.name){
+          showEmpMessage('Name is required.', true);
+          return;
+        }
+        if(!payload.username){
+          showEmpMessage('Username is required.', true);
+          return;
+        }
+        if(mode === 'add' && !payload.password){
+          showEmpMessage('Password is required when adding an employee.', true);
+          return;
+        }
+        if(payload.address === '') delete payload.address;
+        if(payload.contact){
+          payload.contact = payload.contact.replace(/\s+/g, '');
+        }
+        if(!payload.contact) delete payload.contact;
+        if(payload.email_id === '') delete payload.email_id;
+        if(payload.authority === '') delete payload.authority;
+        if(payload.age == null) delete payload.age;
+        if(payload.dept_id == null) delete payload.dept_id;
+        if(payload.reporting_manager == null) delete payload.reporting_manager;
+        if(mode === 'add'){
+          delete payload.emp_id;
+        }
+        showEmpMessage('Saving employee…');
+        try{
+          const res = await fetch('/api/admin/employee/upsert/', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(payload)
+          });
+          const js = await res.json().catch(()=>({}));
+          if(!res.ok || js.ok === false){
+            throw new Error(js.error || `HTTP ${res.status}`);
+          }
+          const savedId = js.data?.emp_id;
+          showEmpMessage(`Employee saved successfully${savedId ? ` (ID ${savedId})` : ''}.`);
+          await fetchData();
+          populateAllSelects({selectedEmployee: savedId});
+          if(mode === 'update' && empSelect){
+            empSelect.value = savedId ? String(savedId) : '';
+            handleEmployeeSelect();
+          }else{
+            if(empMode) empMode.value = 'add';
+            handleEmpModeChange();
+            fillEmployeeForm(null);
+          }
+        }catch(err){
+          showEmpMessage(`Failed to save employee: ${err.message || err}`, true);
+        }
+      });
+    }
+
+    if(credForm){
+      credForm.addEventListener('submit', async (e)=>{
+        e.preventDefault();
+        const mode = credMode ? credMode.value : 'add';
+        const selectedCred = credSelect ? credSelect.value : '';
+        if(mode === 'update' && !selectedCred){
+          showCredMessage('Select credentials to update.', true);
+          return;
+        }
+        const empVal = credEmployee ? credEmployee.value : '';
+        if(!empVal){
+          showCredMessage('Select an employee for these credentials.', true);
+          return;
+        }
+        const payload = {
+          cred_id: mode === 'update' && selectedCred ? Number(selectedCred) : undefined,
+          emp_id: Number(empVal),
+          username: (credUsername?.value || '').trim(),
+          password: credPassword?.value || '',
+          role: credRole?.value || 'Employee',
+          approve_seq: credSeq && credSeq.value ? Number(credSeq.value) : 0
+        };
+        if(!payload.username){
+          showCredMessage('Username is required.', true);
+          return;
+        }
+        if(mode === 'add' && !payload.password){
+          showCredMessage('Password is required when adding credentials.', true);
+          return;
+        }
+        showCredMessage('Saving credentials…');
+        try{
+          const res = await fetch('/api/admin/credentials/upsert/', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(payload)
+          });
+          const js = await res.json().catch(()=>({}));
+          if(!res.ok || js.ok === false){
+            throw new Error(js.error || `HTTP ${res.status}`);
+          }
+          const savedCredId = js.data?.cred_id;
+          showCredMessage('Credentials saved successfully.');
+          await fetchData();
+          populateAllSelects({selectedCredential: savedCredId, selectedEmployee: payload.emp_id});
+          if(savedCredId){
+            if(credMode) credMode.value = 'update';
+            handleCredModeChange();
+            if(credSelect) credSelect.value = String(savedCredId);
+            handleCredentialSelect();
+          }else{
+            fillCredentialForm(null);
+          }
+          if(credPassword) credPassword.value = '';
+        }catch(err){
+          showCredMessage(`Failed to save credentials: ${err.message || err}`, true);
+        }
+      });
+    }
   }
+
   async function openMasterEditor(){
+    setDetailsTitle('Master Travel & Transport');
+    resetDetailsActions();
+    setDecisionVisibility(false);
+    const modal = document.getElementById('detailsModal');
+    if(modal){
+      delete modal.dataset.voucher;
+    }
+    const content = byId('detailsContent');
+    if(content){
+      content.innerHTML = `<div class="uv-wrap"><h3>Master Travel & Transport</h3>
+        <div class="grid-2">
+          <form id="mtForm" class="form">
+            <h4>Master Travel</h4>
+            <div class="form-row"><label for="mt_id">ID (leave blank to add)</label><input id="mt_id" type="number"></div>
+            <div class="form-row"><label for="mt_authoriser">Visit Authoriser Name</label><input id="mt_authoriser" type="text"></div>
+            <div class="form-row"><label for="mt_food">Food per Day</label><input id="mt_food" type="text"></div>
+            <div class="form-row"><label for="mt_status">Status</label><select id="mt_status"><option value="1">Active (1)</option><option value="0">Inactive (0)</option></select></div>
+            <div class="form-actions" style="justify-content:flex-start"><button type="submit" class="btn-primary">Save Travel</button></div>
+          </form>
+          <form id="mmForm" class="form">
+            <h4>Master Transport Mode</h4>
+            <div class="form-row"><label for="mm_id">Mode ID (leave blank to add)</label><input id="mm_id" type="number"></div>
+            <div class="form-row"><label for="mm_mode">Mode of Transport</label><input id="mm_mode" type="text"></div>
+            <div class="form-row"><label for="mm_uom">UOM</label><input id="mm_uom" type="text"></div>
+            <div class="form-row"><label for="mm_fixed">Fixed Status</label><select id="mm_fixed"><option value="1">Yes (1)</option><option value="0">No (0)</option></select></div>
+            <div class="form-row"><label for="mm_price">Price</label><input id="mm_price" type="text"></div>
+            <div class="form-actions" style="justify-content:flex-start"><button type="submit" class="btn-primary">Save Mode</button></div>
+          </form>
+        </div>
+      </div>`;
+    }
     openOverlay('detailsModal');
-    byId('detailsContent').innerHTML = '';
-    const shell=document.createElement('div');
-    shell.innerHTML = `<div class="uv-wrap"><h3>Master Travel & Transport</h3>
-      <div class="grid-2">
-        <form id="mtForm" class="form">
-          <h4>Master Travel</h4>
-          ${input('travelmaster_id','ID (leave blank to add)','number')}
-          ${input('visit_authoriser_name','Visit Authoriser Name')}
-          ${input('food_per_day','Food per Day')}
-          ${input('status','Status (1/0)','number')}
-          <div class="uv-nav" style="justify-content:flex-start"><button class="uv-btn" type="submit">Save Travel</button></div>
-        </form>
-        <form id="mmForm" class="form">
-          <h4>Master Transport Mode</h4>
-          ${input('mode_id','Mode ID (leave blank to add)','number')}
-          ${input('mode_of_transport','Mode of Transport')}
-          ${input('UOM','UOM')}
-          ${input('fixed_status','Fixed Status (1/0)','number')}
-          ${input('price','Price')}
-          <div class="uv-nav" style="justify-content:flex-start"><button class="uv-btn" type="submit">Save Mode</button></div>
-        </form>
-      </div></div>`;
-    byId('detailsContent').appendChild(shell);
 
-    byId('detailsContent').innerHTML = shell.innerHTML;
-    byId('mtForm').addEventListener('submit', async (e)=>{
-      e.preventDefault(); const fd=new FormData(e.target); const data={}; fd.forEach((v,k)=>data[k]=v);
-      const res = await fetch('/api/master/travel/upsert/', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
-      const js = await res.json().catch(()=>({ok:false})); if(!res.ok||!js.ok){ alert('Failed: '+(js.error||res.status)); return; }
-      alert('Saved master travel');
-    });
-    byId('mmForm').addEventListener('submit', async (e)=>{
-      e.preventDefault(); const fd=new FormData(e.target); const data={}; fd.forEach((v,k)=>data[k]=v);
-      const res = await fetch('/api/master/transport_mode/upsert/', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
-      const js = await res.json().catch(()=>({ok:false})); if(!res.ok||!js.ok){ alert('Failed: '+(js.error||res.status)); return; }
-      alert('Saved transport mode');
-    });
+    const root = byId('detailsContent');
+    if(!root) return;
+
+    const mtForm = root.querySelector('#mtForm');
+    const mmForm = root.querySelector('#mmForm');
+
+    if(mtForm){
+      mtForm.addEventListener('submit', async (e)=>{
+        e.preventDefault();
+        const payload = {
+          travelmaster_id: (root.querySelector('#mt_id')?.value || '').trim(),
+          visit_authoriser_name: (root.querySelector('#mt_authoriser')?.value || '').trim(),
+          food_per_day: (root.querySelector('#mt_food')?.value || '').trim(),
+          status: Number(root.querySelector('#mt_status')?.value || '1')
+        };
+        if(payload.travelmaster_id === '') delete payload.travelmaster_id;
+        try{
+          const res = await fetch('/api/master/travel/upsert/', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(payload)
+          });
+          const js = await res.json().catch(()=>({}));
+          if(!res.ok || js.ok === false){
+            throw new Error(js.error || `HTTP ${res.status}`);
+          }
+          alert('Saved master travel');
+        }catch(err){
+          alert('Failed: ' + (err.message || err));
+        }
+      });
+    }
+
+    if(mmForm){
+      mmForm.addEventListener('submit', async (e)=>{
+        e.preventDefault();
+        const payload = {
+          mode_id: (root.querySelector('#mm_id')?.value || '').trim(),
+          mode_of_transport: (root.querySelector('#mm_mode')?.value || '').trim(),
+          UOM: (root.querySelector('#mm_uom')?.value || '').trim(),
+          fixed_status: Number(root.querySelector('#mm_fixed')?.value || '0'),
+          price: (root.querySelector('#mm_price')?.value || '').trim()
+        };
+        if(payload.mode_id === '') delete payload.mode_id;
+        try{
+          const res = await fetch('/api/master/transport_mode/upsert/', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(payload)
+          });
+          const js = await res.json().catch(()=>({}));
+          if(!res.ok || js.ok === false){
+            throw new Error(js.error || `HTTP ${res.status}`);
+          }
+          alert('Saved transport mode');
+        }catch(err){
+          alert('Failed: ' + (err.message || err));
+        }
+      });
+    }
   }
+
+  // Expose editor helpers globally so the navbar dropdown can trigger them
+  window.openWorkOrderEditor = openWorkOrderEditor;
+  window.openEmployeeEditor = openEmployeeEditor;
+  window.openMasterEditor = openMasterEditor;
 
   window.submitDecision = async function(){
     const modal = document.getElementById('detailsModal');
@@ -5008,7 +6001,7 @@ document.addEventListener('click', async (ev)=>{
       try{
         const r = await fetch('/api/validate/list/');
         const j = await r.json();
-        if(r.ok && j.ok) renderValidateTable(j.data||[]);
+        if(r.ok && j.ok) renderValidateTable(j.data||[], j.stats||null);
       }catch(_){ }
     }catch(e){
       const submitBtn = document.getElementById('decisionSubmitBtn'); if(submitBtn) submitBtn.disabled = false;
@@ -5053,7 +6046,7 @@ document.addEventListener('click', async (ev)=>{
       try{
         const r = await fetch('/api/validate/list/');
         const j = await r.json();
-        if(r.ok && j.ok) renderValidateTable(j.data||[]);
+        if(r.ok && j.ok) renderValidateTable(j.data||[], j.stats||null);
       }catch(_){ }
     }catch(e){
       const submitBtn = document.getElementById('decisionSubmitBtn'); if(submitBtn) submitBtn.disabled = false;
