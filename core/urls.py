@@ -51,7 +51,11 @@ urlpatterns = [
     path('payment_request/decision/', views.api_payment_request_decision, name='api_payment_request_decision'),
 
     # Admin maintenance APIs
+    path('admin/departments/', views.api_admin_department_list, name='api_admin_department_list'),
+    path('admin/employees/', views.api_admin_employee_list, name='api_admin_employee_list'),
     path('admin/employee/upsert/', views.api_admin_employee_upsert, name='api_admin_employee_upsert'),
+    path('admin/credentials/', views.api_admin_credentials_list, name='api_admin_credentials_list'),
+    path('admin/credentials/upsert/', views.api_admin_credentials_upsert, name='api_admin_credentials_upsert'),
     path('master/travel/upsert/', views.api_master_travel_upsert, name='api_master_travel_upsert'),
     path('master/transport_mode/upsert/', views.api_master_transport_mode_upsert, name='api_master_transport_mode_upsert'),
 
