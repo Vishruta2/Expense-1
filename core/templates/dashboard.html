@@ -208,7 +208,7 @@
 </script>
 
 
-  <!-- Work Order Overlay (Department Head only) -->
+  <!-- Work Order Overlay (Admin only) -->
   <div id="workOrderOverlay" class="modal-overlay" aria-hidden="true">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="workOrderTitle">
       <div class="modal-head">
@@ -250,14 +250,14 @@
   </div>
 
   <script>
-    // Show button only for Department Head and wire actions
+    // Show button only for Admin and wire actions
     (function(){
-      async function setupDeptHeadUI(){
+      async function setupAdminWorkOrderUI(){
         try{
           const res = await fetch('/api/auth/me/');
           const j = await res.json().catch(()=>({}));
           const role = (j && j.designation ? String(j.designation) : '').toLowerCase();
-          if(role.includes('department') && role.includes('head')){
+          if(role.includes('admin')){
             const btn = document.getElementById('btnWorkOrder');
             if(btn){
               btn.style.display = 'inline-flex';
@@ -345,7 +345,7 @@
           }catch(err){ alert('Failed to save: ' + (err?.message||err)); }
         });
       }
-      setupDeptHeadUI();
+      setupAdminWorkOrderUI();
     })();
   
   function byId(id){ return document.getElementById(id); }

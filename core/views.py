@@ -1709,7 +1709,7 @@ def api_managers_list(request):
     data = [{"emp_id": i, "name": name_by_id.get(i, "")} for i in ids]
     return JsonResponse(data, safe=False)
 
-# ---------------- Projects (Dept Head only) ----------------
+# ---------------- Projects (Admin only) ----------------
 from django.views.decorators.http import require_http_methods
 
 @csrf_exempt
@@ -1717,7 +1717,7 @@ from django.views.decorators.http import require_http_methods
 def api_projects_upsert(request):
     """Create or update a project row.
 
-    AuthZ: Department Head only (role contains both 'department' and 'head').
+    AuthZ: Admin only (role contains 'admin').
 
     Request JSON:
       { project_id?: int,
@@ -1733,12 +1733,10 @@ def api_projects_upsert(request):
     Response: { ok: true, data: { project_id: int, updated: bool } }
     """
     auth = request.session.get("auth") or {}
-    role = (auth.get("role") or "").strip().lower()
     if not auth:
         return _err("Not authenticated", 401)
-    # simple role check for Department Head
-    if not ("department" in role and "head" in role):
-        return _err("Forbidden: Department Head only", 403)
+    if not _require_admin(request):
+        return _err("Forbidden: Admin only", 403)
 
     data = _json(request)
     # Read fields safely
