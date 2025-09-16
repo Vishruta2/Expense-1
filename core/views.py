@@ -67,9 +67,10 @@ def _require_login(request):
 
 
 from contextlib import closing
-from datetime import datetime, date as ddate
+from datetime import datetime, date as ddate, timedelta
 from decimal import Decimal, InvalidOperation
 import json
+from typing import Any, Dict
 
 from django.contrib.auth.hashers import check_password
 from django.db import connection, transaction, IntegrityError
@@ -362,6 +363,181 @@ def _insert_voucher_status_row(voucher_id: str, submitter_emp_id: int):
               n[1], None, a[1],
               n[2], None, a[2],
               n[3], None, a[3]])
+
+_PENDING_PREFIX = "__pending_since:"
+_PENDING_PREFIX_LOWER = _PENDING_PREFIX.lower()
+_DEEMED_REMARKS = {"deemed approve", "deemed approved", "auto approved"}
+_APPROVED_REMARKS = {"approved"}
+
+def _now_utc():
+    return datetime.utcnow()
+
+def _is_pending_marker(value) -> bool:
+    if value is None:
+        return False
+    s = str(value).strip()
+    return s.lower().startswith(_PENDING_PREFIX_LOWER)
+
+def _parse_pending_since(value):
+    if not _is_pending_marker(value):
+        return None
+    raw = str(value).strip()[len(_PENDING_PREFIX):].strip()
+    try:
+        return datetime.fromisoformat(raw)
+    except Exception:
+        try:
+            return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
+
+def _clean_public_remark(value):
+    if not value:
+        return ""
+    return "" if _is_pending_marker(value) else str(value)
+
+def _set_stage_pending(cur, voucher_id: str, stage: int, when: datetime = None):
+    if stage not in (1, 2, 3, 4):
+        return
+    cur.execute(
+        f"SELECT remarks{stage}, approver{stage}id FROM voucher_status WHERE voucher_id=%s LIMIT 1",
+        [voucher_id],
+    )
+    row = cur.fetchone()
+    if not row:
+        return
+    existing, approver_id = row
+    if not approver_id:
+        return
+    if existing:
+        existing_str = str(existing).strip()
+        if existing_str and not _is_pending_marker(existing_str):
+            return
+        if _is_pending_marker(existing_str):
+            return
+    mark_time = when or _now_utc()
+    if hasattr(mark_time, "tzinfo") and mark_time.tzinfo is not None:
+        mark_time = mark_time.replace(tzinfo=None)
+    mark_time = mark_time.replace(microsecond=0)
+    marker = f"{_PENDING_PREFIX}{mark_time.isoformat(sep=' ')}"
+    cur.execute(
+        f"UPDATE voucher_status SET remarks{stage}=%s WHERE voucher_id=%s",
+        [marker, voucher_id],
+    )
+
+def _auto_approve_stage(cur, voucher_id: str, stage: int, now: datetime):
+    if stage not in (1, 2, 3, 4):
+        return
+    cur.execute(
+        f"UPDATE voucher_status SET approver{stage}=%s, remarks{stage}=%s WHERE voucher_id=%s",
+        ["1", "deemed approve", voucher_id],
+    )
+    cur.execute(
+        """
+        UPDATE voucher
+           SET status = CASE WHEN COALESCE(status,0) < 5 THEN COALESCE(status,0) + 1 ELSE status END
+         WHERE voucher_id=%s
+        """,
+        [voucher_id],
+    )
+    next_stage = stage + 1
+    if next_stage <= 4:
+        cur.execute(
+            f"SELECT approver{next_stage}id FROM voucher_status WHERE voucher_id=%s",
+            [voucher_id],
+        )
+        nxt = cur.fetchone()
+        if nxt and nxt[0]:
+            _set_stage_pending(cur, voucher_id, next_stage, now)
+
+def _auto_approve_overdue_vouchers(now=None):
+    now = now or _now_utc()
+    cutoff = now - timedelta(days=2)
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT v.voucher_id,
+                           COALESCE(v.status,0) AS st,
+                           v.upload_date,
+                           vs.approver1, vs.remarks1, vs.approver1id,
+                           vs.approver2, vs.remarks2, vs.approver2id,
+                           vs.approver3, vs.remarks3, vs.approver3id,
+                           vs.approver4, vs.remarks4, vs.approver4id
+                      FROM voucher v
+                      JOIN voucher_status vs ON vs.voucher_id = v.voucher_id
+                     WHERE COALESCE(v.status,0) BETWEEN 1 AND 4
+                    """
+                )
+                rows = cur.fetchall()
+                for r in rows:
+                    voucher_id = r[0]
+                    stage = int(r[1] or 0)
+                    if stage < 1 or stage > 4:
+                        continue
+                    base = 2 + (stage - 1) * 3
+                    approver_flag = r[base]
+                    stage_remark = r[base + 1]
+                    approver_id = r[base + 2]
+                    if not approver_id:
+                        continue
+                    if str(approver_flag or "").strip().lower() in ("1", "approved"):
+                        continue
+                    pending_since = _parse_pending_since(stage_remark)
+                    if pending_since is None:
+                        clean_remark = str(stage_remark or "").strip()
+                        if clean_remark:
+                            continue
+                        if stage == 1 and isinstance(r[2], datetime):
+                            base_time = r[2]
+                        elif stage == 1 and isinstance(r[2], ddate):
+                            base_time = datetime.combine(r[2], datetime.min.time())
+                        else:
+                            base_time = now
+                        _set_stage_pending(cur, voucher_id, stage, base_time)
+                        pending_since = base_time
+                    if pending_since and pending_since <= cutoff:
+                        _auto_approve_stage(cur, voucher_id, stage, now)
+    except Exception:
+        # Do not block the response if auto-approval bookkeeping fails.
+        pass
+
+def _classify_decision(flag, remarks):
+    flag_s = (flag or "").strip().lower()
+    remark_clean = _clean_public_remark(remarks).strip()
+    remark_lower = remark_clean.lower()
+    if remark_lower in _DEEMED_REMARKS:
+        return "deemed"
+    if flag_s in ("1", "approved") or remark_lower in _APPROVED_REMARKS:
+        return "approved"
+    if remark_clean:
+        return "rejected"
+    return "pending"
+
+def _compute_validate_stats(emp_id: int):
+    stats = {"approved": 0, "deemed": 0, "rejected": 0}
+    if not emp_id:
+        return stats
+    sql = """
+        SELECT approver1, remarks1 FROM voucher_status WHERE approver1id=%s
+        UNION ALL
+        SELECT approver2, remarks2 FROM voucher_status WHERE approver2id=%s
+        UNION ALL
+        SELECT approver3, remarks3 FROM voucher_status WHERE approver3id=%s
+        UNION ALL
+        SELECT approver4, remarks4 FROM voucher_status WHERE approver4id=%s
+    """
+    with connection.cursor() as cur:
+        cur.execute(sql, [emp_id, emp_id, emp_id, emp_id])
+        for flag, remark in cur.fetchall():
+            status = _classify_decision(flag, remark)
+            if status == "approved":
+                stats["approved"] += 1
+            elif status == "deemed":
+                stats["deemed"] += 1
+            elif status == "rejected":
+                stats["rejected"] += 1
+    return stats
 
 def _insert_payment_request_status_row(request_id: int, submitter_emp_id: int, initial_remarks: str = None):
     """Create the payment_request_status row with approver names + ids; optional initial remarks (request description)."""
@@ -690,6 +866,166 @@ def _require_admin(request):
         return False
     return ('admin' in role)
 
+@require_GET
+def api_admin_department_list(request):
+    if not _require_admin(request):
+        return _err('Forbidden', 403)
+    with connection.cursor() as cur:
+        cur.execute("SELECT dept_id, dept_name FROM department ORDER BY dept_name ASC")
+        rows = cur.fetchall()
+    data = []
+    for dept_id, name in rows:
+        try:
+            dept_id_val = int(dept_id)
+        except Exception:
+            dept_id_val = None
+        data.append({
+            "dept_id": dept_id_val,
+            "dept_name": name or "",
+        })
+    return JsonResponse(data, safe=False)
+
+@require_GET
+def api_admin_employee_list(request):
+    if not _require_admin(request):
+        return _err('Forbidden', 403)
+    with connection.cursor() as cur:
+        cur.execute(
+            """
+            SELECT e.emp_id, e.name, e.age, e.address, e.contact, e.email_id,
+                   e.dept_id, e.reporting_manager, e.authority,
+                   c.cred_id, c.username, c.role, c.approve_seq
+              FROM employee e
+         LEFT JOIN credentials c ON c.emp_id = e.emp_id
+             ORDER BY e.name ASC
+            """
+        )
+        rows = cur.fetchall()
+    data = []
+    for row in rows:
+        emp_id = int(row[0]) if row[0] is not None else None
+        age = int(row[2]) if row[2] is not None else None
+        contact = str(row[4]) if row[4] is not None else ""
+        dept_id = int(row[6]) if row[6] is not None else None
+        reporting_manager = int(row[7]) if row[7] is not None else None
+        cred_id = int(row[9]) if row[9] is not None else None
+        approve_seq = int(row[12]) if row[12] is not None else 0
+        data.append({
+            "emp_id": emp_id,
+            "name": row[1] or "",
+            "age": age,
+            "address": row[3] or "",
+            "contact": contact,
+            "email_id": row[5] or "",
+            "dept_id": dept_id,
+            "reporting_manager": reporting_manager,
+            "authority": row[8] or "",
+            "credential": {
+                "cred_id": cred_id,
+                "username": row[10] or "",
+                "role": row[11] or "",
+                "approve_seq": approve_seq,
+            },
+        })
+    return JsonResponse(data, safe=False)
+
+@require_GET
+def api_admin_credentials_list(request):
+    if not _require_admin(request):
+        return _err('Forbidden', 403)
+    with connection.cursor() as cur:
+        cur.execute(
+            """
+            SELECT cred_id, role, username, emp_id, approve_seq
+              FROM credentials
+             ORDER BY username ASC
+            """
+        )
+        rows = cur.fetchall()
+    data = []
+    for row in rows:
+        cred_id = int(row[0]) if row[0] is not None else None
+        emp_id = int(row[3]) if row[3] is not None else None
+        approve_seq = int(row[4]) if row[4] is not None else 0
+        data.append({
+            "cred_id": cred_id,
+            "role": row[1] or "",
+            "username": row[2] or "",
+            "emp_id": emp_id,
+            "approve_seq": approve_seq,
+        })
+    return JsonResponse(data, safe=False)
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_admin_credentials_upsert(request):
+    if not _require_admin(request):
+        return _err('Forbidden', 403)
+    body = _json(request)
+
+    def s(key):
+        v = body.get(key)
+        return ("" if v is None else str(v)).strip()
+
+    def n(key):
+        try:
+            return int(body.get(key)) if body.get(key) not in (None, "", []) else None
+        except Exception:
+            return None
+
+    cred_id = n('cred_id')
+    emp_id = n('emp_id')
+    username = s('username')
+    raw_password = body.get('password')
+    password = "" if raw_password is None else str(raw_password)
+    password_clean = password.strip()
+    role = s('role') or 'Employee'
+    approve_seq = n('approve_seq')
+    if approve_seq is None:
+        approve_seq = 0
+
+    if not username:
+        return _err('username is required', 400)
+    if not emp_id:
+        return _err('emp_id is required', 400)
+    if not cred_id and not password_clean:
+        return _err('password is required when adding credentials', 400)
+
+    try:
+        with connection.cursor() as cur:
+            if cred_id:
+                if password_clean:
+                    cur.execute(
+                        """
+                        UPDATE credentials
+                           SET role=%s, username=%s, password=%s, emp_id=%s, approve_seq=%s
+                         WHERE cred_id=%s
+                        """,
+                        [role, username, password_clean, emp_id, approve_seq, cred_id],
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE credentials
+                           SET role=%s, username=%s, emp_id=%s, approve_seq=%s
+                         WHERE cred_id=%s
+                        """,
+                        [role, username, emp_id, approve_seq, cred_id],
+                    )
+            else:
+                new_id = _next_id('credentials', 'cred_id')
+                cur.execute(
+                    """
+                    INSERT INTO credentials (cred_id, role, username, password, emp_id, approve_seq)
+                    VALUES (%s,%s,%s,%s,%s,%s)
+                    """,
+                    [new_id, role, username, password_clean, emp_id, approve_seq],
+                )
+                cred_id = new_id
+        return _ok({"cred_id": int(cred_id)})
+    except Exception as e:
+        return _err(f"DB error: {e}", 500)
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_admin_employee_upsert(request):
@@ -918,6 +1254,15 @@ def api_create_purchase_voucher(request):
                     [voucher_id, desc, bill_file.read() if bill_file else None]
                 )
                 _insert_voucher_status_row(voucher_id, emp_id)
+                stage = None
+                if status is not None:
+                    try:
+                        stage = int(status)
+                    except (TypeError, ValueError):
+                        stage = None
+                if not stage or stage < 1 or stage > 4:
+                    stage = 1
+                _set_stage_pending(cur, voucher_id, stage, _now_utc())
     except Exception as e:
         return _err(f'Database error: {e}', 500)
 
@@ -1456,6 +1801,15 @@ def api_create_expense_voucher(request):
                         [voucher_id, particulars, amount, remarks, bill_bytes]
                     )
                     _insert_voucher_status_row(voucher_id, emp_id)
+                    stage = None
+                    if status is not None:
+                        try:
+                            stage = int(status)
+                        except (TypeError, ValueError):
+                            stage = None
+                    if not stage or stage < 1 or stage > 4:
+                        stage = 1
+                    _set_stage_pending(cur, voucher_id, stage, _now_utc())
 
         return _ok({
             "voucher_id": voucher_id,
@@ -1549,7 +1903,7 @@ def api_managers_list(request):
     data = [{"emp_id": i, "name": name_by_id.get(i, "")} for i in ids]
     return JsonResponse(data, safe=False)
 
-# ---------------- Projects (Dept Head only) ----------------
+# ---------------- Projects (Admin only) ----------------
 from django.views.decorators.http import require_http_methods
 
 @csrf_exempt
@@ -1557,7 +1911,7 @@ from django.views.decorators.http import require_http_methods
 def api_projects_upsert(request):
     """Create or update a project row.
 
-    AuthZ: Department Head only (role contains both 'department' and 'head').
+    AuthZ: Admin only (role contains 'admin').
 
     Request JSON:
       { project_id?: int,
@@ -1573,12 +1927,10 @@ def api_projects_upsert(request):
     Response: { ok: true, data: { project_id: int, updated: bool } }
     """
     auth = request.session.get("auth") or {}
-    role = (auth.get("role") or "").strip().lower()
     if not auth:
         return _err("Not authenticated", 401)
-    # simple role check for Department Head
-    if not ("department" in role and "head" in role):
-        return _err("Forbidden: Department Head only", 403)
+    if not _require_admin(request):
+        return _err("Forbidden: Admin only", 403)
 
     data = _json(request)
     # Read fields safely
@@ -2384,6 +2736,8 @@ def api_validate_list(request):
     if not emp_id:
         return JsonResponse({"ok": False, "error": "Not logged in"}, status=401)
 
+    _auto_approve_overdue_vouchers()
+
     # Build filter on approver id based on voucher.status value
     # status: 1→approver1id, 2→approver2id, 3→approver3id, 4→approver4id
     sql = """
@@ -2435,11 +2789,12 @@ def api_validate_list(request):
             "work_order":    r[4],
             "total_amount":  float(r[5] or 0),
             "stage_approved": (str(r[6]).strip() if r[6] is not None else None),
-            "stage_remarks":  (str(r[7]) if r[7] is not None else ""),
+            "stage_remarks":  _clean_public_remark(r[7]),
         }
         for r in rows
     ]
-    return JsonResponse({"ok": True, "data": data})
+    stats = _compute_validate_stats(emp_id)
+    return JsonResponse({"ok": True, "data": data, "stats": stats})
 
 @require_GET
 def api_validate_details(request, voucher_id: str):
@@ -2450,6 +2805,16 @@ def api_validate_details(request, voucher_id: str):
       - If type == EXPENSE  → expense_type list
       - If type == TRAVEL   → stitched summary from child tables (counts + sums)
     """
+    def _to_iso(value):
+        if value is None:
+            return None
+        if hasattr(value, "isoformat"):
+            try:
+                return value.isoformat()
+            except Exception:
+                return str(value)
+        return str(value)
+
     try:
         # First, fetch header + type
         hdr_sql = """
@@ -2493,60 +2858,176 @@ def api_validate_details(request, voucher_id: str):
                 details["items"] = items
 
             elif vtype == "TRAVEL":
-                # find travel_id
-                cur.execute("""SELECT travel_id FROM travel WHERE voucher_id=%s LIMIT 1""", [voucher_id])
-                rtid = cur.fetchone()
-                travel_id = int(rtid[0]) if rtid else None
+                travel_details: Dict[str, Any] = {}
+                cur.execute(
+                    """
+                        SELECT travel_id, projectname, place, purpose_journey, place_visit,
+                               from_date, to_date, visit_authorised
+                          FROM travel
+                         WHERE voucher_id=%s
+                         LIMIT 1
+                    """,
+                    [voucher_id],
+                )
+                info = cur.fetchone()
+                travel_id = int(info[0]) if info and info[0] is not None else None
+                if info:
+                    travel_details["summary"] = {
+                        "project_name": info[1],
+                        "place": info[2],
+                        "purpose": info[3],
+                        "places_to_visit": info[4],
+                        "from_date": _to_iso(info[5]),
+                        "to_date": _to_iso(info[6]),
+                        "visit_authorised": info[7],
+                    }
                 if travel_id:
                     # Detailed rows + sums
-                    cur.execute("SELECT travel_fare_id, from_place, to_place, mode_transport, COALESCE(cost,0) FROM travel_fare WHERE travel_id=%s", [travel_id])
-                    fare_rows = [{
-                        "id": int(rf[0]),
-                        "from_place": rf[1], "to_place": rf[2],
-                        "mode_transport": rf[3], "amount": float(rf[4] or 0),
-                        "file_url": f"/api/files/travel_fare/{int(rf[0])}/",
-                    } for rf in cur.fetchall()]
+                    cur.execute(
+                        """
+                            SELECT travel_fare_id, from_place, to_place,
+                                   departure_date, departure_time,
+                                   arrival_date, arrival_time,
+                                   mode_transport, COALESCE(cost,0)
+                              FROM travel_fare
+                             WHERE travel_id=%s
+                        """,
+                        [travel_id],
+                    )
+                    fare_rows = [
+                        {
+                            "id": int(rf[0]),
+                            "from_place": rf[1],
+                            "to_place": rf[2],
+                            "departure_date": _to_iso(rf[3]),
+                            "departure_time": _to_iso(rf[4]),
+                            "arrival_date": _to_iso(rf[5]),
+                            "arrival_time": _to_iso(rf[6]),
+                            "mode_transport": rf[7],
+                            "amount": float(rf[8] or 0),
+                            "file_url": f"/api/files/travel_fare/{int(rf[0])}/",
+                        }
+                        for rf in cur.fetchall()
+                    ]
 
-                    cur.execute("SELECT localfare_id, fromplace, toplace, mode_transport, number_km, COALESCE(amount,0) FROM local_fare WHERE travel_id=%s", [travel_id])
-                    local_rows = [{
-                        "id": int(rl[0]),
-                        "from": rl[1], "to": rl[2],
-                        "mode_transport": rl[3], "km": rl[4], "amount": float(rl[5] or 0),
-                        "file_url": f"/api/files/local_fare/{int(rl[0])}/",
-                    } for rl in cur.fetchall()]
+                    cur.execute(
+                        """
+                            SELECT localfare_id, uploaded_date, fromplace, toplace,
+                                   mode_transport, number_km, COALESCE(amount,0)
+                              FROM local_fare
+                             WHERE travel_id=%s
+                        """,
+                        [travel_id],
+                    )
+                    local_rows = [
+                        {
+                            "id": int(rl[0]),
+                            "uploaded_date": _to_iso(rl[1]),
+                            "from_place": rl[2],
+                            "to_place": rl[3],
+                            "mode_transport": rl[4],
+                            "km": (float(rl[5]) if rl[5] not in (None, "") else None),
+                            "amount": float(rl[6] or 0),
+                            "file_url": f"/api/files/local_fare/{int(rl[0])}/",
+                        }
+                        for rl in cur.fetchall()
+                    ]
 
-                    cur.execute("SELECT hotel_acc_id, checkin_date, checkout_date, hotel_name, adress, COALESCE(total_amount,0) FROM hotel_accomodation WHERE travel_id=%s", [travel_id])
-                    hotel_rows = [{
-                        "id": int(rh[0]),
-                        "checkin_date": rh[1],
-                        "checkout_date": rh[2],
-                        "hotel_name": rh[3], "address": rh[4], "amount": float(rh[5] or 0),
-                        "file_url": f"/api/files/hotel/{int(rh[0])}/",
-                    } for rh in cur.fetchall()]
+                    cur.execute(
+                        """
+                            SELECT hotel_acc_id, checkin_date, checkin_time,
+                                   checkout_date, checkout_time,
+                                   hotel_name, adress, COALESCE(total_amount,0)
+                              FROM hotel_accomodation
+                             WHERE travel_id=%s
+                        """,
+                        [travel_id],
+                    )
+                    hotel_rows = [
+                        {
+                            "id": int(rh[0]),
+                            "checkin_date": _to_iso(rh[1]),
+                            "checkin_time": _to_iso(rh[2]),
+                            "checkout_date": _to_iso(rh[3]),
+                            "checkout_time": _to_iso(rh[4]),
+                            "hotel_name": rh[5],
+                            "address": rh[6],
+                            "amount": float(rh[7] or 0),
+                            "file_url": f"/api/files/hotel/{int(rh[0])}/",
+                        }
+                        for rh in cur.fetchall()
+                    ]
 
-                    cur.execute("SELECT food_id, fromdate, todate, number_days, COALESCE(amount,0) FROM food WHERE travel_id=%s", [travel_id])
-                    food_rows = [{
-                        "id": int(rf2[0]), "from_date": rf2[1], "to_date": rf2[2],
-                        "days": int(rf2[3] or 0), "amount": float(rf2[4] or 0),
-                    } for rf2 in cur.fetchall()]
+                    cur.execute(
+                        """
+                            SELECT food_id, fromdate, todate, number_days, COALESCE(amount,0)
+                              FROM food
+                             WHERE travel_id=%s
+                        """,
+                        [travel_id],
+                    )
+                    food_rows = [
+                        {
+                            "id": int(rf2[0]),
+                            "from_date": _to_iso(rf2[1]),
+                            "to_date": _to_iso(rf2[2]),
+                            "days": int(rf2[3] or 0),
+                            "amount": float(rf2[4] or 0),
+                        }
+                        for rf2 in cur.fetchall()
+                    ]
 
-                    cur.execute("SELECT miscel_expense_id, uploaded_date, particulars, COALESCE(amount,0) FROM miscellaneous_expenses WHERE travel_id=%s", [travel_id])
-                    misc_rows = [{
-                        "id": int(rm[0]), "date": rm[1], "particulars": rm[2], "amount": float(rm[3] or 0),
-                        "file_url": f"/api/files/misc/{int(rm[0])}/",
-                    } for rm in cur.fetchall()]
+                    cur.execute(
+                        """
+                            SELECT miscel_expense_id, uploaded_date, particulars, COALESCE(amount,0)
+                              FROM miscellaneous_expenses
+                             WHERE travel_id=%s
+                        """,
+                        [travel_id],
+                    )
+                    misc_rows = [
+                        {
+                            "id": int(rm[0]),
+                            "uploaded_date": _to_iso(rm[1]),
+                            "particulars": rm[2],
+                            "amount": float(rm[3] or 0),
+                            "file_url": f"/api/files/misc/{int(rm[0])}/",
+                        }
+                        for rm in cur.fetchall()
+                    ]
 
                     # Sums
-                    def _sum_q(sql):
+                    def _sum_q(sql: str) -> float:
                         cur.execute(sql, [travel_id])
-                        rr = cur.fetchone(); return float(rr[0] or 0)
-                    details["travel"] = {
-                        "fare":  {"rows": fare_rows,  "sum": _sum_q("SELECT COALESCE(SUM(cost),0) FROM travel_fare WHERE travel_id=%s")},
-                        "local": {"rows": local_rows, "sum": _sum_q("SELECT COALESCE(SUM(amount),0) FROM local_fare WHERE travel_id=%s")},
-                        "hotel": {"rows": hotel_rows, "sum": _sum_q("SELECT COALESCE(SUM(total_amount),0) FROM hotel_accomodation WHERE travel_id=%s")},
-                        "food":  {"rows": food_rows,  "sum": _sum_q("SELECT COALESCE(SUM(amount),0) FROM food WHERE travel_id=%s")},
-                        "misc":  {"rows": misc_rows,  "sum": _sum_q("SELECT COALESCE(SUM(amount),0) FROM miscellaneous_expenses WHERE travel_id=%s")},
-                    }
+                        rr = cur.fetchone()
+                        return float(rr[0] or 0)
+
+                    travel_details.update(
+                        {
+                            "fare": {
+                                "rows": fare_rows,
+                                "sum": _sum_q("SELECT COALESCE(SUM(cost),0) FROM travel_fare WHERE travel_id=%s"),
+                            },
+                            "local": {
+                                "rows": local_rows,
+                                "sum": _sum_q("SELECT COALESCE(SUM(amount),0) FROM local_fare WHERE travel_id=%s"),
+                            },
+                            "hotel": {
+                                "rows": hotel_rows,
+                                "sum": _sum_q("SELECT COALESCE(SUM(total_amount),0) FROM hotel_accomodation WHERE travel_id=%s"),
+                            },
+                            "food": {
+                                "rows": food_rows,
+                                "sum": _sum_q("SELECT COALESCE(SUM(amount),0) FROM food WHERE travel_id=%s"),
+                            },
+                            "misc": {
+                                "rows": misc_rows,
+                                "sum": _sum_q("SELECT COALESCE(SUM(amount),0) FROM miscellaneous_expenses WHERE travel_id=%s"),
+                            },
+                        }
+                    )
+
+                details["travel"] = travel_details
 
         return JsonResponse({"ok": True, "data": details})
     except Exception as e:
@@ -2626,14 +3107,18 @@ def api_validate_decision(request):
                 if int(cur_status or 0) != int(seq):
                     return _err("Voucher is not at your stage for action.", 400)
                 if decision == "approve":
-                    # Mark approver{seq} = '1'
-                    cur.execute(f"UPDATE voucher_status SET approver{seq}=%s WHERE voucher_id=%s", ["1", voucher_id])
+                    now = _now_utc()
+                    cur.execute(
+                        f"UPDATE voucher_status SET approver{seq}=%s, remarks{seq}=%s WHERE voucher_id=%s",
+                        ["1", "Approved", voucher_id],
+                    )
                     # Increment status up to 5
                     cur.execute("""
                         UPDATE voucher
                            SET status = CASE WHEN COALESCE(status,0) < 5 THEN COALESCE(status,0) + 1 ELSE status END
                          WHERE voucher_id=%s
                     """, [voucher_id])
+                    _set_stage_pending(cur, voucher_id, seq + 1, now)
                 else:  # reject
                     if len(remarks) < 50:
                         return _err("Remarks must be at least 50 characters.", 400)
@@ -2649,6 +3134,8 @@ def api_my_vouchers(request):
     emp_id = int(auth.get("emp_id") or 0)
     if not emp_id:
         return JsonResponse({"ok": False, "error": "Not logged in"}, status=401)
+
+    _auto_approve_overdue_vouchers()
 
     with connection.cursor() as cur:
         cur.execute("""
@@ -2674,9 +3161,9 @@ def api_my_vouchers(request):
             "upload_date":  r[1].isoformat() if r[1] else "",
             "total_amount": float(r[2] or 0),
             "voucher_type": r[3] or "",
-            "approver1": r[4], "remarks1": r[5],
-            "approver2": r[6], "remarks2": r[7],
-            "approver3": r[8], "remarks3": r[9],
-            "approver4": r[10], "remarks4": r[11],
+            "approver1": r[4], "remarks1": _clean_public_remark(r[5]),
+            "approver2": r[6], "remarks2": _clean_public_remark(r[7]),
+            "approver3": r[8], "remarks3": _clean_public_remark(r[9]),
+            "approver4": r[10], "remarks4": _clean_public_remark(r[11]),
         }
     return JsonResponse({"ok": True, "data": [J(r) for r in rows]})
