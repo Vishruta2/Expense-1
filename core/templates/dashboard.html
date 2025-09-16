@@ -206,6 +206,33 @@
     });
   
   function byId(id){ return document.getElementById(id); }
+
+  function normalizeFileUrl(url){
+    if(!url) return '';
+    try {
+      if (/^(?:data|blob):/i.test(url)) return url;
+      const origin = (window.location && window.location.origin && window.location.origin !== 'null')
+        ? window.location.origin
+        : window.location.href;
+      const absolute = new URL(url, origin);
+      const host = absolute.hostname;
+      if (host === '127.0.0.1' || host === 'localhost' || host === '[::1]') {
+        const currentHost = window.location.hostname;
+        if (currentHost) absolute.hostname = currentHost;
+        const currentPort = window.location.port;
+        absolute.port = currentPort ? currentPort : '';
+        if (/^https?:$/i.test(window.location.protocol)) {
+          absolute.protocol = window.location.protocol;
+        }
+      }
+      if (absolute.protocol === 'http:' && window.location.protocol === 'https:') {
+        absolute.protocol = 'https:';
+      }
+      return absolute.toString();
+    } catch (_err) {
+      return url;
+    }
+  }
 </script>
 
 
@@ -1856,11 +1883,12 @@ function openBillFor(i){
     const type = item.type || 'purchase';
     const vid  = item.voucher_id || item.claimNo || item.id;
     if(vid){
-      const url = `/api/files/${type}/voucher/${vid}/`;
+      const url = normalizeFileUrl(`/api/files/${type}/voucher/${vid}/`);
       window.open(url, '_blank'); return;
     }
     const files = item.fileUrls || item.bills || [];
-    if(files.length){ window.open(files[0], '_blank'); return; }
+    const firstFile = Array.isArray(files) ? files.map(normalizeFileUrl).find(Boolean) : '';
+    if(firstFile){ window.open(firstFile, '_blank'); return; }
     alert('No bill available for this entry yet.');
   }catch(err){ console.error(err); alert('Unable to open bill.'); }
 }
@@ -3969,7 +3997,7 @@ document.addEventListener('click', async (ev)=>{
     const data = js.data || {};
     if(vtype==='EXPENSE'){
       const items = Array.isArray(data.items) ? data.items : [];
-      const urls  = items.map(x=>x.file_url).filter(Boolean);
+      const urls  = items.map(x=>normalizeFileUrl(x.file_url)).filter(Boolean);
       if(!urls.length){ alert('No bill file found for this expense voucher.'); return; }
       // Open the first file for convenience
       window.open(urls[0], '_blank', 'noopener');
@@ -3978,7 +4006,7 @@ document.addEventListener('click', async (ev)=>{
 
     if(vtype==='TRAVEL'){
       // Collect all file URLs from travel sub-sections
-      const collect = (arr)=> (Array.isArray(arr)?arr:[]).map(x=>x.file_url).filter(Boolean);
+      const collect = (arr)=> (Array.isArray(arr)?arr:[]).map(x=>normalizeFileUrl(x.file_url)).filter(Boolean);
       const urls = [
         ...collect(data.travel?.fare?.rows),
         ...collect(data.travel?.local?.rows),
@@ -3997,7 +4025,7 @@ document.addEventListener('click', async (ev)=>{
       panel.innerHTML = '';
       urls.forEach((u, idx)=>{
         const a = document.createElement('a');
-        a.className = 'btn-secondary'; a.textContent = `View ${idx+1}`; a.target = '_blank'; a.rel='noopener'; a.href = u;
+        a.className = 'btn-secondary'; a.textContent = `View ${idx+1}`; a.target = '_blank'; a.rel='noopener'; a.href = normalizeFileUrl(u);
         a.style.padding='4px 8px';
         panel.appendChild(a);
       });
@@ -4652,11 +4680,15 @@ document.addEventListener('click', async (ev)=>{
             attachments: [],
           };
           if(base.voucher.voucher_type === 'PURCHASE'){
-            const f = { type:'bill', item_id: 1, filename: 'Bill', url: (d.purchase && d.purchase.bill_url) || '' };
-            return { ...base, voucher: { ...base.voucher, description: (d.purchase && d.purchase.description) || '' }, attachments: f.url ? [f] : [] };
+            const billUrl = normalizeFileUrl((d.purchase && d.purchase.bill_url) || '');
+            const f = { type:'bill', item_id: 1, filename: 'Bill', url: billUrl };
+            return { ...base, voucher: { ...base.voucher, description: (d.purchase && d.purchase.description) || '' }, attachments: billUrl ? [f] : [] };
           }
           if(base.voucher.voucher_type === 'EXPENSE'){
-            const files = Array.isArray(d.items) ? d.items.map((it, i)=>({ type:'bill', item_id:(i+1), filename: it.expense_type || `bill_${i+1}`, url: it.file_url })) : [];
+            const files = Array.isArray(d.items)
+              ? d.items.map((it, i)=>({ type:'bill', item_id:(i+1), filename: it.expense_type || `bill_${i+1}`, url: normalizeFileUrl(it.file_url) }))
+                  .filter(f => f.url)
+              : [];
             return { ...base, attachments: files };
           }
           if(base.voucher.voucher_type === 'TRAVEL'){
@@ -4671,7 +4703,10 @@ document.addEventListener('click', async (ev)=>{
                 arrival_date: r.arrival_date, arrival_time: r.arrival_time,
                 mode_transport: r.mode_transport,
                 cost: r.amount, amount: r.amount,
-                files: r.file_url ? [{url: r.file_url, filename: 'Bill'}] : []
+                files: (()=>{
+                  const fileUrl = normalizeFileUrl(r.file_url);
+                  return fileUrl ? [{url: fileUrl, filename: 'Bill'}] : [];
+                })()
               }));
               tot.fare = Number(tr.fare.sum||0);
             }
@@ -4681,7 +4716,10 @@ document.addEventListener('click', async (ev)=>{
                 from: r.from, to: r.to,
                 mode_transport: r.mode_transport, km: r.km,
                 cost: r.amount, amount: r.amount,
-                files: r.file_url ? [{url: r.file_url, filename: 'Bill'}] : []
+                files: (()=>{
+                  const fileUrl = normalizeFileUrl(r.file_url);
+                  return fileUrl ? [{url: fileUrl, filename: 'Bill'}] : [];
+                })()
               }));
               tot.local = Number(tr.local.sum||0);
             }
@@ -4690,7 +4728,10 @@ document.addEventListener('click', async (ev)=>{
                 checkin_date: r.checkin_date, checkout_date: r.checkout_date,
                 hotel_name: r.hotel_name, address: r.address,
                 cost: r.amount, amount: r.amount,
-                files: r.file_url ? [{url: r.file_url, filename: 'Bill'}] : []
+                files: (()=>{
+                  const fileUrl = normalizeFileUrl(r.file_url);
+                  return fileUrl ? [{url: fileUrl, filename: 'Bill'}] : [];
+                })()
               }));
               tot.hotel = Number(tr.hotel.sum||0);
             }
@@ -4705,7 +4746,10 @@ document.addEventListener('click', async (ev)=>{
               sec.misc = tr.misc.rows.map(r=>({
                 date: r.date, particulars: r.particulars,
                 cost: r.amount, amount: r.amount,
-                files: r.file_url ? [{url: r.file_url, filename: 'Bill'}] : []
+                files: (()=>{
+                  const fileUrl = normalizeFileUrl(r.file_url);
+                  return fileUrl ? [{url: fileUrl, filename: 'Bill'}] : [];
+                })()
               }));
               tot.misc = Number(tr.misc.sum||0);
             }
