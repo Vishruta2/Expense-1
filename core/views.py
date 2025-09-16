@@ -67,7 +67,7 @@ def _require_login(request):
 
 
 from contextlib import closing
-from datetime import datetime, date as ddate
+from datetime import datetime, date as ddate, timedelta
 from decimal import Decimal, InvalidOperation
 import json
 
@@ -362,6 +362,181 @@ def _insert_voucher_status_row(voucher_id: str, submitter_emp_id: int):
               n[1], None, a[1],
               n[2], None, a[2],
               n[3], None, a[3]])
+
+_PENDING_PREFIX = "__pending_since:"
+_PENDING_PREFIX_LOWER = _PENDING_PREFIX.lower()
+_DEEMED_REMARKS = {"deemed approve", "deemed approved", "auto approved"}
+_APPROVED_REMARKS = {"approved"}
+
+def _now_utc():
+    return datetime.utcnow()
+
+def _is_pending_marker(value) -> bool:
+    if value is None:
+        return False
+    s = str(value).strip()
+    return s.lower().startswith(_PENDING_PREFIX_LOWER)
+
+def _parse_pending_since(value):
+    if not _is_pending_marker(value):
+        return None
+    raw = str(value).strip()[len(_PENDING_PREFIX):].strip()
+    try:
+        return datetime.fromisoformat(raw)
+    except Exception:
+        try:
+            return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
+
+def _clean_public_remark(value):
+    if not value:
+        return ""
+    return "" if _is_pending_marker(value) else str(value)
+
+def _set_stage_pending(cur, voucher_id: str, stage: int, when: datetime = None):
+    if stage not in (1, 2, 3, 4):
+        return
+    cur.execute(
+        f"SELECT remarks{stage}, approver{stage}id FROM voucher_status WHERE voucher_id=%s LIMIT 1",
+        [voucher_id],
+    )
+    row = cur.fetchone()
+    if not row:
+        return
+    existing, approver_id = row
+    if not approver_id:
+        return
+    if existing:
+        existing_str = str(existing).strip()
+        if existing_str and not _is_pending_marker(existing_str):
+            return
+        if _is_pending_marker(existing_str):
+            return
+    mark_time = when or _now_utc()
+    if hasattr(mark_time, "tzinfo") and mark_time.tzinfo is not None:
+        mark_time = mark_time.replace(tzinfo=None)
+    mark_time = mark_time.replace(microsecond=0)
+    marker = f"{_PENDING_PREFIX}{mark_time.isoformat(sep=' ')}"
+    cur.execute(
+        f"UPDATE voucher_status SET remarks{stage}=%s WHERE voucher_id=%s",
+        [marker, voucher_id],
+    )
+
+def _auto_approve_stage(cur, voucher_id: str, stage: int, now: datetime):
+    if stage not in (1, 2, 3, 4):
+        return
+    cur.execute(
+        f"UPDATE voucher_status SET approver{stage}=%s, remarks{stage}=%s WHERE voucher_id=%s",
+        ["1", "deemed approve", voucher_id],
+    )
+    cur.execute(
+        """
+        UPDATE voucher
+           SET status = CASE WHEN COALESCE(status,0) < 5 THEN COALESCE(status,0) + 1 ELSE status END
+         WHERE voucher_id=%s
+        """,
+        [voucher_id],
+    )
+    next_stage = stage + 1
+    if next_stage <= 4:
+        cur.execute(
+            f"SELECT approver{next_stage}id FROM voucher_status WHERE voucher_id=%s",
+            [voucher_id],
+        )
+        nxt = cur.fetchone()
+        if nxt and nxt[0]:
+            _set_stage_pending(cur, voucher_id, next_stage, now)
+
+def _auto_approve_overdue_vouchers(now=None):
+    now = now or _now_utc()
+    cutoff = now - timedelta(days=2)
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT v.voucher_id,
+                           COALESCE(v.status,0) AS st,
+                           v.upload_date,
+                           vs.approver1, vs.remarks1, vs.approver1id,
+                           vs.approver2, vs.remarks2, vs.approver2id,
+                           vs.approver3, vs.remarks3, vs.approver3id,
+                           vs.approver4, vs.remarks4, vs.approver4id
+                      FROM voucher v
+                      JOIN voucher_status vs ON vs.voucher_id = v.voucher_id
+                     WHERE COALESCE(v.status,0) BETWEEN 1 AND 4
+                    """
+                )
+                rows = cur.fetchall()
+                for r in rows:
+                    voucher_id = r[0]
+                    stage = int(r[1] or 0)
+                    if stage < 1 or stage > 4:
+                        continue
+                    base = 2 + (stage - 1) * 3
+                    approver_flag = r[base]
+                    stage_remark = r[base + 1]
+                    approver_id = r[base + 2]
+                    if not approver_id:
+                        continue
+                    if str(approver_flag or "").strip().lower() in ("1", "approved"):
+                        continue
+                    pending_since = _parse_pending_since(stage_remark)
+                    if pending_since is None:
+                        clean_remark = str(stage_remark or "").strip()
+                        if clean_remark:
+                            continue
+                        if stage == 1 and isinstance(r[2], datetime):
+                            base_time = r[2]
+                        elif stage == 1 and isinstance(r[2], ddate):
+                            base_time = datetime.combine(r[2], datetime.min.time())
+                        else:
+                            base_time = now
+                        _set_stage_pending(cur, voucher_id, stage, base_time)
+                        pending_since = base_time
+                    if pending_since and pending_since <= cutoff:
+                        _auto_approve_stage(cur, voucher_id, stage, now)
+    except Exception:
+        # Do not block the response if auto-approval bookkeeping fails.
+        pass
+
+def _classify_decision(flag, remarks):
+    flag_s = (flag or "").strip().lower()
+    remark_clean = _clean_public_remark(remarks).strip()
+    remark_lower = remark_clean.lower()
+    if remark_lower in _DEEMED_REMARKS:
+        return "deemed"
+    if flag_s in ("1", "approved") or remark_lower in _APPROVED_REMARKS:
+        return "approved"
+    if remark_clean:
+        return "rejected"
+    return "pending"
+
+def _compute_validate_stats(emp_id: int):
+    stats = {"approved": 0, "deemed": 0, "rejected": 0}
+    if not emp_id:
+        return stats
+    sql = """
+        SELECT approver1, remarks1 FROM voucher_status WHERE approver1id=%s
+        UNION ALL
+        SELECT approver2, remarks2 FROM voucher_status WHERE approver2id=%s
+        UNION ALL
+        SELECT approver3, remarks3 FROM voucher_status WHERE approver3id=%s
+        UNION ALL
+        SELECT approver4, remarks4 FROM voucher_status WHERE approver4id=%s
+    """
+    with connection.cursor() as cur:
+        cur.execute(sql, [emp_id, emp_id, emp_id, emp_id])
+        for flag, remark in cur.fetchall():
+            status = _classify_decision(flag, remark)
+            if status == "approved":
+                stats["approved"] += 1
+            elif status == "deemed":
+                stats["deemed"] += 1
+            elif status == "rejected":
+                stats["rejected"] += 1
+    return stats
 
 def _insert_payment_request_status_row(request_id: int, submitter_emp_id: int, initial_remarks: str = None):
     """Create the payment_request_status row with approver names + ids; optional initial remarks (request description)."""
@@ -1078,6 +1253,15 @@ def api_create_purchase_voucher(request):
                     [voucher_id, desc, bill_file.read() if bill_file else None]
                 )
                 _insert_voucher_status_row(voucher_id, emp_id)
+                stage = None
+                if status is not None:
+                    try:
+                        stage = int(status)
+                    except (TypeError, ValueError):
+                        stage = None
+                if not stage or stage < 1 or stage > 4:
+                    stage = 1
+                _set_stage_pending(cur, voucher_id, stage, _now_utc())
     except Exception as e:
         return _err(f'Database error: {e}', 500)
 
@@ -1616,6 +1800,15 @@ def api_create_expense_voucher(request):
                         [voucher_id, particulars, amount, remarks, bill_bytes]
                     )
                     _insert_voucher_status_row(voucher_id, emp_id)
+                    stage = None
+                    if status is not None:
+                        try:
+                            stage = int(status)
+                        except (TypeError, ValueError):
+                            stage = None
+                    if not stage or stage < 1 or stage > 4:
+                        stage = 1
+                    _set_stage_pending(cur, voucher_id, stage, _now_utc())
 
         return _ok({
             "voucher_id": voucher_id,
@@ -2542,6 +2735,8 @@ def api_validate_list(request):
     if not emp_id:
         return JsonResponse({"ok": False, "error": "Not logged in"}, status=401)
 
+    _auto_approve_overdue_vouchers()
+
     # Build filter on approver id based on voucher.status value
     # status: 1→approver1id, 2→approver2id, 3→approver3id, 4→approver4id
     sql = """
@@ -2593,11 +2788,12 @@ def api_validate_list(request):
             "work_order":    r[4],
             "total_amount":  float(r[5] or 0),
             "stage_approved": (str(r[6]).strip() if r[6] is not None else None),
-            "stage_remarks":  (str(r[7]) if r[7] is not None else ""),
+            "stage_remarks":  _clean_public_remark(r[7]),
         }
         for r in rows
     ]
-    return JsonResponse({"ok": True, "data": data})
+    stats = _compute_validate_stats(emp_id)
+    return JsonResponse({"ok": True, "data": data, "stats": stats})
 
 @require_GET
 def api_validate_details(request, voucher_id: str):
@@ -2784,14 +2980,18 @@ def api_validate_decision(request):
                 if int(cur_status or 0) != int(seq):
                     return _err("Voucher is not at your stage for action.", 400)
                 if decision == "approve":
-                    # Mark approver{seq} = '1'
-                    cur.execute(f"UPDATE voucher_status SET approver{seq}=%s WHERE voucher_id=%s", ["1", voucher_id])
+                    now = _now_utc()
+                    cur.execute(
+                        f"UPDATE voucher_status SET approver{seq}=%s, remarks{seq}=%s WHERE voucher_id=%s",
+                        ["1", "Approved", voucher_id],
+                    )
                     # Increment status up to 5
                     cur.execute("""
                         UPDATE voucher
                            SET status = CASE WHEN COALESCE(status,0) < 5 THEN COALESCE(status,0) + 1 ELSE status END
                          WHERE voucher_id=%s
                     """, [voucher_id])
+                    _set_stage_pending(cur, voucher_id, seq + 1, now)
                 else:  # reject
                     if len(remarks) < 50:
                         return _err("Remarks must be at least 50 characters.", 400)
@@ -2807,6 +3007,8 @@ def api_my_vouchers(request):
     emp_id = int(auth.get("emp_id") or 0)
     if not emp_id:
         return JsonResponse({"ok": False, "error": "Not logged in"}, status=401)
+
+    _auto_approve_overdue_vouchers()
 
     with connection.cursor() as cur:
         cur.execute("""
@@ -2832,9 +3034,9 @@ def api_my_vouchers(request):
             "upload_date":  r[1].isoformat() if r[1] else "",
             "total_amount": float(r[2] or 0),
             "voucher_type": r[3] or "",
-            "approver1": r[4], "remarks1": r[5],
-            "approver2": r[6], "remarks2": r[7],
-            "approver3": r[8], "remarks3": r[9],
-            "approver4": r[10], "remarks4": r[11],
+            "approver1": r[4], "remarks1": _clean_public_remark(r[5]),
+            "approver2": r[6], "remarks2": _clean_public_remark(r[7]),
+            "approver3": r[8], "remarks3": _clean_public_remark(r[9]),
+            "approver4": r[10], "remarks4": _clean_public_remark(r[11]),
         }
     return JsonResponse({"ok": True, "data": [J(r) for r in rows]})

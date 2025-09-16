@@ -494,7 +494,7 @@
             <button class="btn-ghost" data-home>← Back to Home</button>
             <h2 style="margin:0">Validate Voucher</h2>
             <div class="summary" id="summary" style="margin-left:auto;">
-              Approved: 0 | Deemed Approve: 0 | Rejected: 0
+              Approved: 0 | Deemed Approved: 0 | Rejected: 0
             </div>
           </div>
           <div class="table-wrap">
@@ -3807,18 +3807,27 @@ async function submitPurchaseFromJson(voucherJson, purchaseJson, fileObj = null)
     updateAction('Rejected','s-rejected', remarks);
     closeOverlay('rejectModal');
   };
+  window.validateSummaryStats = {approved:0, deemed:0, rejected:0};
   window.updateAction = function(status, cls, remarks=''){
     const row = document.querySelector('#approveTable tbody tr'); if(!row) return;
     row.cells[8].innerHTML = `<span class="${cls}">${status}</span>`;
     row.cells[9].textContent = remarks;
     if(typeof updateSummary==='function') updateSummary();
   };
-  window.updateSummary = function(){
-    const rows=document.querySelectorAll('#approveTable tbody tr');
-    let approved=0, rejected=0;
-    rows.forEach(r=>{ const s=(r.cells[8]?.innerText||'').trim(); if(s==='Approved') approved++; if(s==='Rejected') rejected++; });
-    const deemed = rows.length - approved - rejected;
-    const el=document.getElementById('summary'); if(el) el.textContent = `Approved: ${approved} | Deemed Approve: ${deemed} | Rejected: ${rejected}`;
+  window.updateSummary = function(stats){
+    if(stats && typeof stats === 'object'){
+      const approved = Number(stats.approved || 0);
+      const deemed = Number(stats.deemed || 0);
+      const rejected = Number(stats.rejected || 0);
+      window.validateSummaryStats = {approved, deemed, rejected};
+    } else if(typeof window.validateSummaryStats !== 'object'){
+      window.validateSummaryStats = {approved:0, deemed:0, rejected:0};
+    }
+    const current = window.validateSummaryStats || {approved:0, deemed:0, rejected:0};
+    const el=document.getElementById('summary');
+    if(el){
+      el.textContent = `Approved: ${current.approved} | Deemed Approved: ${current.deemed} | Rejected: ${current.rejected}`;
+    }
   };
 
   // Kick a re-render if user is already on voucher page
@@ -3850,11 +3859,17 @@ async function submitPurchaseFromJson(voucherJson, purchaseJson, fileObj = null)
 <script>
 (function(){
   // When "Validate Voucher" tab is activated, load data
-  function renderValidateTable(rows){
+  function renderValidateTable(rows, stats){
     const tbody = document.querySelector('#approveTable tbody');
     if(!tbody) return;
+    const summaryStats = (stats && typeof stats === 'object') ? {
+      approved: Number(stats.approved || 0),
+      deemed: Number(stats.deemed || 0),
+      rejected: Number(stats.rejected || 0)
+    } : null;
     if(!Array.isArray(rows) || rows.length===0){
       tbody.innerHTML = '<tr class="empty"><td colspan="10">No vouchers pending for you.</td></tr>';
+      if(typeof updateSummary==='function') updateSummary(summaryStats || {approved:0, deemed:0, rejected:0});
       return;
     }
     tbody.innerHTML = rows.map((r, i) => {
@@ -3975,6 +3990,7 @@ async function submitPurchaseFromJson(voucherJson, purchaseJson, fileObj = null)
         }
       });
     });
+    if(typeof updateSummary==='function') updateSummary(summaryStats || {approved:0, deemed:0, rejected:0});
   }
 
   async function loadValidateList(){
@@ -3982,11 +3998,10 @@ async function submitPurchaseFromJson(voucherJson, purchaseJson, fileObj = null)
       const res = await fetch('/api/validate/list/');
       const js  = await res.json();
       if(!res.ok || !js.ok){ throw new Error(js.error || `HTTP ${res.status}`); }
-      renderValidateTable(js.data || []);
-      if(typeof updateSummary==='function') updateSummary(); // reuse your summary bar logic
+      renderValidateTable(js.data || [], js.stats || null);
     }catch(err){
       console.error(err);
-      renderValidateTable([]);
+      renderValidateTable([], null);
     }
   }
 
@@ -5885,7 +5900,7 @@ document.addEventListener('click', async (ev)=>{
       try{
         const r = await fetch('/api/validate/list/');
         const j = await r.json();
-        if(r.ok && j.ok) renderValidateTable(j.data||[]);
+        if(r.ok && j.ok) renderValidateTable(j.data||[], j.stats||null);
       }catch(_){ }
     }catch(e){
       const submitBtn = document.getElementById('decisionSubmitBtn'); if(submitBtn) submitBtn.disabled = false;
@@ -5930,7 +5945,7 @@ document.addEventListener('click', async (ev)=>{
       try{
         const r = await fetch('/api/validate/list/');
         const j = await r.json();
-        if(r.ok && j.ok) renderValidateTable(j.data||[]);
+        if(r.ok && j.ok) renderValidateTable(j.data||[], j.stats||null);
       }catch(_){ }
     }catch(e){
       const submitBtn = document.getElementById('decisionSubmitBtn'); if(submitBtn) submitBtn.disabled = false;
