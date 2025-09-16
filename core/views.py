@@ -690,6 +690,166 @@ def _require_admin(request):
         return False
     return ('admin' in role)
 
+@require_GET
+def api_admin_department_list(request):
+    if not _require_admin(request):
+        return _err('Forbidden', 403)
+    with connection.cursor() as cur:
+        cur.execute("SELECT dept_id, dept_name FROM department ORDER BY dept_name ASC")
+        rows = cur.fetchall()
+    data = []
+    for dept_id, name in rows:
+        try:
+            dept_id_val = int(dept_id)
+        except Exception:
+            dept_id_val = None
+        data.append({
+            "dept_id": dept_id_val,
+            "dept_name": name or "",
+        })
+    return JsonResponse(data, safe=False)
+
+@require_GET
+def api_admin_employee_list(request):
+    if not _require_admin(request):
+        return _err('Forbidden', 403)
+    with connection.cursor() as cur:
+        cur.execute(
+            """
+            SELECT e.emp_id, e.name, e.age, e.address, e.contact, e.email_id,
+                   e.dept_id, e.reporting_manager, e.authority,
+                   c.cred_id, c.username, c.role, c.approve_seq
+              FROM employee e
+         LEFT JOIN credentials c ON c.emp_id = e.emp_id
+             ORDER BY e.name ASC
+            """
+        )
+        rows = cur.fetchall()
+    data = []
+    for row in rows:
+        emp_id = int(row[0]) if row[0] is not None else None
+        age = int(row[2]) if row[2] is not None else None
+        contact = str(row[4]) if row[4] is not None else ""
+        dept_id = int(row[6]) if row[6] is not None else None
+        reporting_manager = int(row[7]) if row[7] is not None else None
+        cred_id = int(row[9]) if row[9] is not None else None
+        approve_seq = int(row[12]) if row[12] is not None else 0
+        data.append({
+            "emp_id": emp_id,
+            "name": row[1] or "",
+            "age": age,
+            "address": row[3] or "",
+            "contact": contact,
+            "email_id": row[5] or "",
+            "dept_id": dept_id,
+            "reporting_manager": reporting_manager,
+            "authority": row[8] or "",
+            "credential": {
+                "cred_id": cred_id,
+                "username": row[10] or "",
+                "role": row[11] or "",
+                "approve_seq": approve_seq,
+            },
+        })
+    return JsonResponse(data, safe=False)
+
+@require_GET
+def api_admin_credentials_list(request):
+    if not _require_admin(request):
+        return _err('Forbidden', 403)
+    with connection.cursor() as cur:
+        cur.execute(
+            """
+            SELECT cred_id, role, username, emp_id, approve_seq
+              FROM credentials
+             ORDER BY username ASC
+            """
+        )
+        rows = cur.fetchall()
+    data = []
+    for row in rows:
+        cred_id = int(row[0]) if row[0] is not None else None
+        emp_id = int(row[3]) if row[3] is not None else None
+        approve_seq = int(row[4]) if row[4] is not None else 0
+        data.append({
+            "cred_id": cred_id,
+            "role": row[1] or "",
+            "username": row[2] or "",
+            "emp_id": emp_id,
+            "approve_seq": approve_seq,
+        })
+    return JsonResponse(data, safe=False)
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_admin_credentials_upsert(request):
+    if not _require_admin(request):
+        return _err('Forbidden', 403)
+    body = _json(request)
+
+    def s(key):
+        v = body.get(key)
+        return ("" if v is None else str(v)).strip()
+
+    def n(key):
+        try:
+            return int(body.get(key)) if body.get(key) not in (None, "", []) else None
+        except Exception:
+            return None
+
+    cred_id = n('cred_id')
+    emp_id = n('emp_id')
+    username = s('username')
+    raw_password = body.get('password')
+    password = "" if raw_password is None else str(raw_password)
+    password_clean = password.strip()
+    role = s('role') or 'Employee'
+    approve_seq = n('approve_seq')
+    if approve_seq is None:
+        approve_seq = 0
+
+    if not username:
+        return _err('username is required', 400)
+    if not emp_id:
+        return _err('emp_id is required', 400)
+    if not cred_id and not password_clean:
+        return _err('password is required when adding credentials', 400)
+
+    try:
+        with connection.cursor() as cur:
+            if cred_id:
+                if password_clean:
+                    cur.execute(
+                        """
+                        UPDATE credentials
+                           SET role=%s, username=%s, password=%s, emp_id=%s, approve_seq=%s
+                         WHERE cred_id=%s
+                        """,
+                        [role, username, password_clean, emp_id, approve_seq, cred_id],
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE credentials
+                           SET role=%s, username=%s, emp_id=%s, approve_seq=%s
+                         WHERE cred_id=%s
+                        """,
+                        [role, username, emp_id, approve_seq, cred_id],
+                    )
+            else:
+                new_id = _next_id('credentials', 'cred_id')
+                cur.execute(
+                    """
+                    INSERT INTO credentials (cred_id, role, username, password, emp_id, approve_seq)
+                    VALUES (%s,%s,%s,%s,%s,%s)
+                    """,
+                    [new_id, role, username, password_clean, emp_id, approve_seq],
+                )
+                cred_id = new_id
+        return _ok({"cred_id": int(cred_id)})
+    except Exception as e:
+        return _err(f"DB error: {e}", 500)
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_admin_employee_upsert(request):
