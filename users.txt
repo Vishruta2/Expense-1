@@ -1,5 +1,5 @@
 # EMPLOYEES (role omitted => EMPLOYEE)
-emp1, pass1
+emp1,pass1
 emp2, pass2
 
 # ACCOUNTANTS

@@ -1,0 +1,140 @@
+auth_group	id	int	NO	PRI	
+auth_group	name	varchar	NO	UNI	
+auth_group_permissions	id	int	NO	PRI	
+auth_group_permissions	group_id	int	NO	MUL	
+auth_group_permissions	permission_id	int	NO	MUL	
+auth_permission	id	int	NO	PRI	
+auth_permission	name	varchar	NO		
+auth_permission	content_type_id	int	NO	MUL	
+auth_permission	codename	varchar	NO		
+auth_user	id	int	NO	PRI	
+auth_user	password	varchar	NO		
+auth_user	last_login	datetime	YES		
+auth_user	is_superuser	tinyint	NO		
+auth_user	username	varchar	NO	UNI	
+auth_user	first_name	varchar	NO		
+auth_user	last_name	varchar	NO		
+auth_user	email	varchar	NO		
+auth_user	is_staff	tinyint	NO		
+auth_user	is_active	tinyint	NO		
+auth_user	date_joined	datetime	NO		
+auth_user_groups	id	int	NO	PRI	
+auth_user_groups	user_id	int	NO	MUL	
+auth_user_groups	group_id	int	NO	MUL	
+auth_user_user_permissions	id	int	NO	PRI	
+auth_user_user_permissions	user_id	int	NO	MUL	
+auth_user_user_permissions	permission_id	int	NO	MUL	
+credentials	cred_id	int	NO	PRI	
+credentials	role	varchar	NO		
+credentials	username	varchar	NO	UNI	
+credentials	password	varchar	NO		
+credentials	emp_id	int	YES	MUL	
+department	dept_id	int	NO	PRI	
+department	dept_name	varchar	NO		
+department	dept_type	varchar	YES		
+department	dept_head	varchar	YES		
+django_admin_log	id	int	NO	PRI	
+django_admin_log	action_time	datetime	NO		
+django_admin_log	object_id	longtext	YES		
+django_admin_log	object_repr	varchar	NO		
+django_admin_log	action_flag	smallint	NO		
+django_admin_log	change_message	longtext	NO		
+django_admin_log	content_type_id	int	YES	MUL	
+django_admin_log	user_id	int	NO	MUL	
+django_content_type	id	int	NO	PRI	
+django_content_type	app_label	varchar	NO	MUL	
+django_content_type	model	varchar	NO		
+django_migrations	id	int	NO	PRI	
+django_migrations	app	varchar	NO		
+django_migrations	name	varchar	NO		
+django_migrations	applied	datetime	NO		
+django_session	session_key	varchar	NO	PRI	
+django_session	session_data	longtext	NO		
+django_session	expire_date	datetime	NO	MUL	
+employee	emp_id	int	NO	PRI	
+employee	name	varchar	NO		
+employee	age	int	YES		
+employee	address	varchar	YES		
+employee	contact	bigint	YES		
+employee	email_id	varchar	YES	UNI	
+employee	dept_id	int	YES	MUL	
+food	food_id	int	NO	PRI	
+food	travel_id	int	NO	MUL	
+food	fromdate	date	NO		
+food	todate	date	NO		
+food	number_days	int	NO		
+food	amount	decimal	NO		0.00
+hotel_accomodation	hotel_acc_id	int	NO	PRI	
+hotel_accomodation	travel_id	int	NO	MUL	
+hotel_accomodation	checkin_date	date	NO		
+hotel_accomodation	checkin_time	time	NO		
+hotel_accomodation	checkout_date	date	NO		
+hotel_accomodation	checkout_time	time	NO		
+hotel_accomodation	hotel_name	varchar	NO		
+hotel_accomodation	adress	varchar	NO		
+hotel_accomodation	total_amount	decimal	NO		0.00
+hotel_accomodation	bill_photo	longblob	YES		
+local_fare	localfare_id	int	NO	PRI	
+local_fare	travel_id	int	NO	MUL	
+local_fare	uploaded_date	datetime	NO		CURRENT_TIMESTAMP
+local_fare	fromplace	varchar	NO		
+local_fare	toplace	varchar	NO		
+local_fare	mode_transport	varchar	NO		
+local_fare	number_km	decimal	YES		
+local_fare	amount	decimal	YES		
+local_fare	ref_image	longblob	YES		
+master_transport_mode	mode_id	int	NO	PRI	
+master_transport_mode	mode_of_transport	varchar	NO		
+master_transport_mode	UOM	varchar	YES		
+master_transport_mode	fixed_status	tinyint	NO		0
+master_transport_mode	price	decimal	NO		0.00
+master_travel	travelmaster_id	int	NO	PRI	
+master_travel	visit_authoriser_name	varchar	NO		
+master_travel	food_per_day	decimal	NO		0.00
+master_travel	status	tinyint	NO		1
+miscellaneous_expenses	miscel_expense_id	int	NO	PRI	
+miscellaneous_expenses	travel_id	int	NO	MUL	
+miscellaneous_expenses	uploaded_date	date	NO		
+miscellaneous_expenses	particulars	varchar	NO		
+miscellaneous_expenses	amount	decimal	NO		0.00
+miscellaneous_expenses	bill_photo	longblob	YES		
+projects	project_id	int	NO	PRI	
+projects	work_order_no	varchar	NO		
+projects	project_name	varchar	NO		
+projects	client_name	varchar	YES		
+projects	project_type	varchar	YES		
+projects	place	varchar	YES		
+projects	address	varchar	YES		
+projects	dept_id	int	YES	MUL	
+projects	status	varchar	YES		
+purchase	purchase_id	int	NO	PRI	
+purchase	voucher_id	varchar	YES	MUL	
+purchase	description	varchar	YES		
+purchase	bill_photo	longblob	YES		
+travel	travel_id	int	NO	PRI	
+travel	voucher_id	varchar	NO	MUL	
+travel	projectname	varchar	NO		
+travel	place	varchar	NO		
+travel	purpose_journey	varchar	NO		
+travel	place_visit	varchar	NO		
+travel	from_date	date	NO		
+travel	to_date	date	NO		
+travel	visit_authorised	varchar	NO		
+travel_fare	travel_fare_id	int	NO	PRI	
+travel_fare	travel_id	int	NO	MUL	
+travel_fare	from_place	varchar	NO		
+travel_fare	to_place	varchar	NO		
+travel_fare	departure_date	date	NO		
+travel_fare	departure_time	time	NO		
+travel_fare	arrival_date	date	NO		
+travel_fare	arrival_time	time	NO		
+travel_fare	mode_trasport	varchar	NO		
+travel_fare	cost	decimal	NO		0.00
+travel_fare	bill_photo	longblob	YES		
+voucher	voucher_id	varchar	NO	PRI	
+voucher	work_order_no	varchar	YES		
+voucher	upload_date	date	YES		
+voucher	expense_date	date	YES		
+voucher	voucher_type	varchar	YES		
+voucher	total_amount	decimal	YES		
+voucher	emp_id	int	YES	MUL	

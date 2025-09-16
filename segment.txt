@@ -1,0 +1,25 @@
+            <h2 style="margin:0">Payment Requests</h2>
+          </div>
+          <div class="actions" style="margin-top:4px;display:flex;gap:10px;align-items:center;position:relative">
+            <div class="btn-group">
+              <button id="btnPRDropdown" class="btn">＋ New Request <span class="caret">▾</span></button>
+              <div id="prMenu" class="menu" role="menu" aria-label="New Payment Request Menu">
+                <button type="button" data-prtype="Advance">Advance</button>
+                <button type="button" data-prtype="Purchase">Purchase</button>
+                <button type="button" data-prtype="Settlement">Settlement</button>
+              </div>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data" id="paymentTable">
+              <thead>
+                <tr>
+                  <th style="width:50px;">SL</th>
+                  <th style="width:120px;">Date</th>
+                  <th>Claim No</th>
+                  <th style="width:120px;">Amount</th>
+                  <th>Department Head</th>
+                  <th>Finance Head</th>
+                  <th>Accountant</th>
+                </tr>
+              </thead>

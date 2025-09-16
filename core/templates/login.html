@@ -67,38 +67,86 @@
     .login-container button:hover {
       background-color: #45a049;
     }
+    .errors {
+      color: #b00020;
+      text-align: left;
+      font-size: 14px;
+      margin-top: 6px;
+    }
   </style>
 </head>
 <body>
   <div class="login-container">
     <h2>Login</h2>
-    <form method="POST" action="">
-      {% csrf_token %}
-      <input type="text" name="username" placeholder="Enter Username" required />
-      <input type="password" name="password" placeholder="Enter Password" required />
-      <button type="submit">Login</button>
-    </form>
-  </div>
 
-  <!-- Serialize Django messages to JSON -->
-  <script id="messages-json" type="application/json">
-    [
-      {% for message in messages %}
-        "{{ message|escapejs }}"{% if not forloop.last %},{% endif %}
-      {% endfor %}
-    ]
-  </script>
-  <script>
-    (function () {
+    <!-- Show non-field errors (e.g., "Please enter a correct username and password.") -->
+    {% if form.non_field_errors %}
+      <div class="errors">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+   <form id="loginForm" autocomplete="on">
+  {% csrf_token %}
+  <input type="text" name="username" placeholder="Username" required />
+  <input type="password" name="password" placeholder="Password" required />
+  <button type="submit">Login</button>
+  <div class="errors" id="loginError" style="display:none;color:#b00020;margin-top:8px;"></div>
+</form>
+
+<script defer>
+  // Read Django's csrftoken (only needed if your login view is NOT @csrf_exempt)
+  function getCookie(name) {
+    const m = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+    return m ? decodeURIComponent(m[2]) : null;
+  }
+  function showError(msg) {
+    const box = document.getElementById('loginError');
+    box.textContent = msg || 'Login failed';
+    box.style.display = 'block';
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const form = document.getElementById('loginForm');
+    if (!form) { console.error('loginForm not found'); return; }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();                                   // <- stop normal page submit
+      document.getElementById('loginError').style.display = 'none';
+
+      const username = form.username.value.trim();
+      const password = form.password.value;
+
+      const headers = { 'Content-Type': 'application/json' };
+      const csrftoken = getCookie('csrftoken');             // send if view isn't csrf_exempt
+      if (csrftoken) headers['X-CSRFToken'] = csrftoken;
+
+      let res, payload;
       try {
-        var el = document.getElementById("messages-json");
-        if (!el) return;
-        var msgs = JSON.parse(el.textContent || "[]");
-        (msgs || []).forEach(function (m) { alert(m); });
-      } catch (e) {
-        console.error("Failed to parse messages:", e);
+        res = await fetch('/api/auth/login/', {
+          method: 'POST',
+          headers,
+          credentials: 'same-origin',
+          body: JSON.stringify({ username, password })
+        });
+      } catch (err) {
+        console.error('Network error:', err);
+        showError('Network error. Is the server running?');
+        return;
       }
-    })();
-  </script>
+
+      try { payload = await res.json(); }
+      catch { showError('Unexpected server response.'); return; }
+
+      console.log('Login response:', res.status, payload);
+
+      if (!payload.ok) { showError(payload.error || 'Invalid username or password'); return; }
+
+      // Redirect: use server-provided redirect if present, otherwise
+      // send all roles to the unified dashboard page.
+      const redirect = (payload?.data?.redirect) || '/employee-dashboard/';
+      location.href = redirect;
+    });
+  });
+</script>
+
 </body>
 </html>

@@ -1,0 +1,1201 @@
+# --- imports (consolidated) ---
+import json
+from contextlib import closing
+
+from decimal import Decimal, InvalidOperation
+import base64, re as _re
+
+def D(x, default="0.00"):
+    try:
+        if x is None: return Decimal(default)
+        if isinstance(x, (int, float, Decimal)): return Decimal(str(x))
+        s = str(x).strip()
+        if not s: return Decimal(default)
+        return Decimal(s)
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal(default)
+
+def b64bytes(s):
+    """Accepts raw base64 or data URLs like "data:image/png;base64,...." and returns bytes or None."""
+    if not s: return None
+    try:
+        st = s
+        if isinstance(st, bytes):
+            return st
+        st = str(st)
+        m = _re.match(r'^data:[^;]+;base64,(.*)$', st, _re.IGNORECASE)
+        if m: st = m.group(1)
+        return base64.b64decode(st, validate=False)
+    except Exception:
+        return None
+from datetime import datetime, date as _date
+
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_GET
+from django.db import connection, transaction
+from django.http import JsonResponse, HttpResponseBadRequest, HttpResponse, HttpResponseNotFound
+from django.shortcuts import redirect
+from decimal import Decimal
+
+def _ok(data=None, status=200):
+    return JsonResponse({"ok": True, "data": data or {}}, status=status)
+
+def _err(msg, status=400):
+    return JsonResponse({"ok": False, "error": msg}, status=status)
+
+def _get_json_or_form(request):
+    # supports multipart (FormData) or JSON
+    ctype = (request.META.get("CONTENT_TYPE") or "").lower()
+    if ctype.startswith("application/json"):
+        try:
+            return json.loads(request.body.decode("utf-8") or "{}"), {}
+        except Exception:
+            return {}, {}
+    # multipart: normal fields in POST, files in FILES
+    return request.POST.dict(), request.FILES
+
+# optional: used by the bill-serving views
+def _require_login(request):
+    if not request.session.get("auth"):
+        return redirect("/")
+    return None
+
+
+
+
+from contextlib import closing
+from datetime import datetime, date as ddate
+from decimal import Decimal, InvalidOperation
+import json
+
+from django.contrib.auth.hashers import check_password
+from django.db import connection, transaction, IntegrityError
+from django.http import (
+    JsonResponse, HttpResponseNotAllowed, HttpResponse, HttpResponseNotFound
+)
+from django.shortcuts import render, redirect
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_GET
+
+
+# ---------------- helpers ----------------
+def _ok(data=None, status=200):
+    return JsonResponse({"ok": True, "data": data or {}}, status=status)
+
+def _err(msg, status=400):
+    return JsonResponse({"ok": False, "error": msg}, status=status)
+
+def _json(request):
+    ctype = (request.META.get("CONTENT_TYPE") or "").lower()
+    if ctype.startswith("application/json"):
+        try:
+            return json.loads((request.body or b"").decode("utf-8") or "{}")
+        except Exception:
+            return {}
+    return {k: v for k, v in request.POST.items()}
+
+def _json_or_form(request):
+    ctype = (request.META.get("CONTENT_TYPE") or "").lower()
+    if ctype.startswith("application/json"):
+        try:
+            return json.loads((request.body or b"").decode("utf-8") or "{}"), None
+        except Exception:
+            return {}, None
+    return {k: v for k, v in request.POST.items()}, request.FILES
+
+def _next_id(table, col):
+    with closing(connection.cursor()) as cur:
+        cur.execute(f"SELECT COALESCE(MAX({col}),0)+1 FROM {table}")
+        (n,) = cur.fetchone()
+    return int(n or 1)
+
+
+# ------------- pages / lookups -------------
+def employee_dashboard(request):
+    if not request.session.get("auth"):
+        return redirect("/")
+    return render(request, "dashboard.html", {"user": request.session["auth"]})
+
+@require_GET
+def suppliers_list(request):
+    with connection.cursor() as cur:
+        cur.execute("SELECT supplier_id, name FROM supplierdata ORDER BY name ASC")
+        rows = cur.fetchall()
+    return JsonResponse([{"supplier_id": r[0], "name": r[1]} for r in rows], safe=False)
+@require_GET
+def projects_list(request):
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT work_order_no, project_name
+            FROM projects
+            ORDER BY project_name ASC
+        """)
+        rows = cur.fetchall()
+    data = [{"work_order_no": r[0], "project_name": r[1]} for r in rows]
+    return JsonResponse(data, safe=False)
+# @require_GET
+# def projects_list(request):
+#     with connection.cursor() as cur:
+#         cur.execute("SELECT work_order_no FROM projects ORDER BY work_order_no ASC")
+#         rows = cur.fetchall()
+#     return JsonResponse([{"work_order_no": r[0]} for r in rows], safe=False)
+
+
+# ---------------- auth ----------------
+@csrf_exempt
+def login_api(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+
+    b = _json(request)
+    username = (b.get("username") or "").strip()
+    password = (b.get("password") or "")  # keep original
+    if not username or not password.strip():
+        return JsonResponse({"ok": False, "error": "username and password are required"}, status=400)
+
+    with closing(connection.cursor()) as cur:
+        # If your DB collation is case-insensitive this is fine; otherwise LOWER() both sides.
+        cur.execute(
+            "SELECT cred_id, role, password, emp_id FROM Credentials WHERE username=%s LIMIT 1",
+            [username],
+        )
+        row = cur.fetchone()
+
+    if not row:
+        return JsonResponse({"ok": False, "error": "Invalid username or password"}, status=401)
+
+    cred_id, role, db_password, emp_id = row
+    # Robust password match: hashed OR plaintext, with leading/trailing spaces tolerated
+    p_in  = password
+    p_in_s = password.strip()
+    dbp   = db_password or ""
+    dbp_s = dbp.strip()
+
+    valid = False
+    try:
+        # hashed check first (db can be hashed)
+        valid = check_password(p_in, dbp) or check_password(p_in_s, dbp) \
+                or check_password(p_in, dbp_s) or check_password(p_in_s, dbp_s)
+    except Exception:
+        pass
+
+    # plaintext fallback (legacy)
+    if not valid:
+        valid = (p_in == dbp) or (p_in_s == dbp) or (p_in == dbp_s) or (p_in_s == dbp_s)
+
+    if not valid:
+        # keep it generic (don’t reveal which part failed)
+        return JsonResponse({"ok": False, "error": "Invalid username or password"}, status=401)
+
+    request.session["auth"] = {
+        "cred_id": int(cred_id),
+        "username": username,
+        "role": role,
+        "emp_id": int(emp_id),
+    }
+    return JsonResponse({"ok": True, "data": {"redirect": "/employee-dashboard/", "role": role, "emp_id": int(emp_id)}}, status=200)
+
+
+@csrf_exempt
+def logout_api(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    request.session.flush()
+    return _ok({"logged_out": True})
+
+
+# -------- voucher id: X-PV-001 (per-employee per-month) --------
+def _safe_json_parse(raw):
+    """Try hard to parse JSON coming from multipart forms."""
+    if raw is None:
+        return {}
+    s = str(raw).strip()
+    if not s:
+        return {}
+    # First try normal JSON
+    try:
+        return json.loads(s)
+    except Exception:
+        pass
+    # Remove BOM and control chars
+    s2 = s.encode('utf-8', 'ignore').decode('utf-8', 'ignore')
+    # Remove trailing commas before } or ]
+    s2 = re.sub(r',\s*([}\]])', r'\1', s2)
+    try:
+        return json.loads(s2)
+    except Exception:
+        pass
+    # Convert single quotes to double quotes ONLY if it looks like a flat JSON
+    if s2.startswith('{') and s2.endswith('}'):
+        s3 = re.sub(r"'", '"', s2)
+        try:
+            return json.loads(s3)
+        except Exception:
+            pass
+    raise ValueError('Invalid JSON')
+
+def _parse_voucher_json(request):
+    # Detect content type
+    ctype = (request.META.get("CONTENT_TYPE") or "").lower()
+
+    # 1) Multipart/form-data: read fields from request.POST (not request.body)
+    if ctype.startswith("multipart/"):
+        # If a JSON blob is provided explicitly, parse it
+        if request.POST.get("voucher_json") is not None:
+            return _safe_json_parse(request.POST.get("voucher_json"))
+
+        # Otherwise, synthesize a dict from regular form fields you already send
+        d = request.POST.dict()
+        return {
+            # map to keys your view already supports
+            "bill_date":     d.get("bill_date") or d.get("billdate") or "",
+            # your UI’s “Date” is the upload/current date
+            "upload_date":   d.get("date") or d.get("uploadate") or "",
+            "work_order_no": d.get("work_order_no") or d.get("workordernumber") or "",
+            "total_amount":  d.get("total_amount"),
+            "purchase1":     {"description": d.get("description") or ""},
+            "username":      d.get("username") or ((request.session.get("auth") or {}).get("username") or ""),
+            "vouchertype":   d.get("voucher_type") or "purchase",
+        }
+
+    # 2) Application/json: parse normally
+    if ctype.startswith("application/json"):
+        try:
+            return json.loads((request.body or b"").decode("utf-8") or "{}")
+        except Exception:
+            raise ValueError("Invalid JSON")
+
+    # Fallback
+    return {}
+
+def _get_emp_id_from_request(request, username):
+    try:
+        auth = request.session.get('auth') or {}
+        if auth.get('emp_id'):
+            return int(auth['emp_id'])
+    except Exception:
+        pass
+    if username:
+        with connection.cursor() as cur:
+            cur.execute("""                SELECT e.emp_id
+                  FROM credentials c
+                  JOIN employee e ON e.emp_id = c.emp_id
+                 WHERE c.username = %s
+                 LIMIT 1
+            """, [username])
+            row = cur.fetchone()
+            if row: return int(row[0])
+            cur.execute("""                SELECT emp_id FROM employee
+                 WHERE name=%s OR email_id=%s
+                 LIMIT 1
+            """, [username, username])
+            row = cur.fetchone()
+            if row: return int(row[0])
+    return None
+def _manager_approve_seq_for(emp_id: int):
+    """
+    Return credentials.approve_seq for the reporting manager of the given emp_id.
+    If nothing found, return None.
+    """
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT c.approve_seq
+            FROM employee e
+            JOIN employee mgr ON mgr.emp_id = e.reporting_manager
+            JOIN credentials c ON c.emp_id = mgr.emp_id
+            WHERE e.emp_id = %s
+            LIMIT 1
+        """, [emp_id])
+        row = cur.fetchone()
+    return int(row[0]) if row and row[0] is not None else None
+def _manager_chain(emp_id: int, max_levels: int = 4):
+    """Follow employee.reporting_manager up to 4 levels; returns a list of manager emp_ids [lvl1, lvl2, ...]."""
+    chain, seen, cur_emp = [], {emp_id}, emp_id
+    with connection.cursor() as cur:
+        for _ in range(max_levels):
+            cur.execute("SELECT reporting_manager FROM employee WHERE emp_id=%s", [cur_emp])
+            row = cur.fetchone()
+            if not row or not row[0]: break
+            mid = int(row[0])
+            if mid in seen: break
+            chain.append(mid)
+            seen.add(mid)
+            cur_emp = mid
+    return chain
+
+def _insert_voucher_status_row(voucher_id: str, submitter_emp_id: int):
+    """Create the voucher_status row with approver names + ids; remarks left NULL."""
+    ids = _manager_chain(submitter_emp_id, 4)
+    # Fetch names for those ids
+    names = {}
+    if ids:
+        ph = ",".join(["%s"] * len(ids))
+        with connection.cursor() as cur:
+            cur.execute(f"SELECT emp_id, name FROM employee WHERE emp_id IN ({ph})", ids)
+            for eid, nm in cur.fetchall():
+                names[int(eid)] = nm or ""
+    a = (ids + [None, None, None, None])[:4]
+    n = [names.get(i, None) if i else None for i in a]
+    with connection.cursor() as cur:
+        cur.execute("""
+            INSERT INTO voucher_status
+            (voucher_id,
+             approver1, remarks1, approver1id,
+             approver2, remarks2, approver2id,
+             approver3, remarks3, approver3id,
+             approver4, remarks4, approver4id)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, [voucher_id,
+              n[0], None, a[0],
+              n[1], None, a[1],
+              n[2], None, a[2],
+              n[3], None, a[3]])
+
+def _normalize_date(s):
+    if not s: return ''
+    s = s.strip()
+    for fmt in ('%Y-%m-%d','%d-%m-%Y'):
+        try: return datetime.strptime(s, fmt).date().isoformat()
+        except ValueError: continue
+    return s
+
+def _voucher_prefix(vtype):
+    vtype = (vtype or '').upper()
+    return {'PURCHASE':'PV','TRAVEL':'TV','EXPENSE':'EV'}.get(vtype,'VX')
+
+def _generate_voucher_id(emp_id, upload_date, vtype):
+    with connection.cursor() as cur:
+        cur.execute("SELECT name FROM employee WHERE emp_id=%s", [emp_id])
+        row = cur.fetchone()
+    first_initial = (row[0].strip()[:1].upper() if row and row[0] else 'X')
+    ym = (upload_date or '')[:7]
+    with connection.cursor() as cur:
+        cur.execute("""            SELECT COUNT(*) FROM voucher
+             WHERE emp_id=%s AND UPPER(voucher_type)=%s
+               AND DATE_FORMAT(upload_date,'%%Y-%%m')=%s
+        """, [emp_id, (vtype or '').upper(), ym])
+        (n,) = cur.fetchone() or (0,)
+    return f"{first_initial}-{_voucher_prefix(vtype)}-{(n+1):03d}"
+
+@csrf_exempt
+def api_create_purchase_voucher(request):
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+    try:
+        b = _parse_voucher_json(request)
+    except ValueError as e:
+        return _err(str(e), 400)
+
+    bill_date   = _normalize_date((b.get('billdate') or b.get('bill_date') or '').strip())
+    upload_date = _normalize_date((b.get('uploadate') or b.get('upload_date') or '').strip())
+    work_order  = (b.get('workordernumber') or b.get('work_order_no') or '').strip()
+    vtype       = (b.get('vouchertype') or 'purchase').strip()
+    username    = (b.get('username') or '').strip()
+    total_amt_raw = b.get('total_amount')
+
+    try:
+        total_amt = float(total_amt_raw) if str(total_amt_raw).strip() != '' else None
+    except Exception:
+        total_amt = None
+
+    if not bill_date or not upload_date or not work_order or total_amt is None:
+        return _err('billdate, uploadate, workordernumber, total_amount are required', 400)
+
+    desc = ((b.get('purchase1') or {}).get('description') or '').strip()
+    bill_file = request.FILES.get('bill')
+
+    emp_id = _get_emp_id_from_request(request, username)
+    if emp_id is None:
+        return _err('Employee not found or not logged in', 401)
+
+    voucher_id = _generate_voucher_id(emp_id, upload_date, vtype)
+    status = _manager_approve_seq_for(emp_id)
+
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO voucher (voucher_id, work_order_no, upload_date, expense_date, voucher_type, total_amount, emp_id,status)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                """,[voucher_id, work_order, upload_date, bill_date, vtype, total_amt, emp_id, status]
+                )
+                cur.execute(
+                    """                    INSERT INTO purchase (voucher_id, description, bill_photo)
+                    VALUES (%s,%s,%s)
+                    """,
+                    [voucher_id, desc, bill_file.read() if bill_file else None]
+                )
+                _insert_voucher_status_row(voucher_id, emp_id)
+    except Exception as e:
+        return _err(f'Database error: {e}', 500)
+
+    return _ok({'voucher_id': voucher_id, 'total_amount': total_amt, 'description': desc}, status=201)
+
+# ------------- bill file serving -------------
+def _require_login(request):
+    if not request.session.get("auth"):
+        return redirect("/")
+    return None
+
+def _guess_mime(data: bytes) -> str:
+    if not data: return "application/octet-stream"
+    if data.startswith(b"%PDF-"): return "application/pdf"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"): return "image/png"
+    if data.startswith(b"\xff\xd8"): return "image/jpeg"
+    if data.startswith(b"GIF8"): return "image/gif"
+    if data[:4] == b"RIFF" and b"WEBP" in data[:16]: return "image/webp"
+    if data[:4] in (b"II*\x00", b"MM\x00*"): return "image/tiff"
+    return "application/octet-stream"
+
+def serve_purchase_bill_by_voucher(request, voucher_id: str):
+    guard = _require_login(request)
+    if guard: return guard
+    with closing(connection.cursor()) as cur:
+        cur.execute("SELECT bill_photo FROM purchase WHERE voucher_id=%s LIMIT 1", [voucher_id])
+        row = cur.fetchone()
+    if not row or row[0] is None:
+        return HttpResponseNotFound("No bill found for this voucher.")
+    data = bytes(row[0]); ctype = _guess_mime(data)
+    resp = HttpResponse(data, content_type=ctype)
+    disp = "inline" if (ctype == "application/pdf" or ctype.startswith("image/")) else "attachment"
+    resp["Content-Disposition"] = f'{disp}; filename="bill_{voucher_id}.{ctype.split("/")[-1]}"'
+    return resp
+
+def serve_purchase_bill_by_id(request, purchase_id: int):
+    guard = _require_login(request)
+    if guard: return guard
+    with closing(connection.cursor()) as cur:
+        cur.execute("SELECT bill_photo FROM purchase WHERE purchase_id=%s LIMIT 1", [purchase_id])
+        row = cur.fetchone()
+    if not row or row[0] is None:
+        return HttpResponseNotFound("No bill found for this purchase.")
+    data = bytes(row[0]); ctype = _guess_mime(data)
+    resp = HttpResponse(data, content_type=ctype)
+    disp = "inline" if (ctype == "application/pdf" or ctype.startswith("image/")) else "attachment"
+    resp["Content-Disposition"] = f'{disp}; filename="bill_{purchase_id}.{ctype.split("/")[-1]}"'
+    return resp
+
+# --- Generic file serving for other voucher sections ---
+def _serve_blob(sql: str, param):
+    guard = None
+    def _login_guard(req):
+        if not req.session.get("auth"):
+            return redirect("/")
+        return None
+    # using inner function so we don't duplicate code
+    def handler(request, id_val):
+        g = _login_guard(request)
+        if g: return g
+        with closing(connection.cursor()) as cur:
+            cur.execute(sql, [id_val])
+            row = cur.fetchone()
+        if not row or row[0] is None:
+            return HttpResponseNotFound("No file found.")
+        data = bytes(row[0]); ctype = _guess_mime(data)
+        resp = HttpResponse(data, content_type=ctype)
+        disp = "inline" if (ctype == "application/pdf" or ctype.startswith("image/")) else "attachment"
+        resp["Content-Disposition"] = f'{disp}; filename="file_{id_val}.{ctype.split("/")[-1]}"'
+        return resp
+    return handler
+
+# Endpoints
+serve_expense_bill_by_id        = _serve_blob("SELECT bill_photo FROM expense WHERE expense_id=%s LIMIT 1", param=None)
+serve_travel_fare_bill_by_id    = _serve_blob("SELECT bill_photo FROM travel_fare WHERE travel_fare_id=%s LIMIT 1", param=None)
+
+from django.http import HttpResponse, HttpResponseNotFound
+
+def serve_local_fare_bill_by_id(request, id_val: int):
+    guard = _require_login(request)
+    if guard: return guard
+    from contextlib import closing
+    with closing(connection.cursor()) as cur:
+        row = None
+        try:
+            cur.execute(
+                "SELECT COALESCE(bill_photo, ref_image) FROM local_fare WHERE localfare_id=%s LIMIT 1",
+                [id_val]
+            )
+            row = cur.fetchone()
+        except Exception:
+            try:
+                cur.execute(
+                    "SELECT COALESCE(bill_photo, ref_image) FROM local_fare WHERE local_id=%s LIMIT 1",
+                    [id_val]
+                )
+                row = cur.fetchone()
+            except Exception:
+                row = None
+    if not row or row[0] is None:
+        return HttpResponseNotFound("No file found.")
+    data = bytes(row[0])
+    ctype = _guess_mime(data)
+    resp = HttpResponse(data, content_type=ctype)
+    disp = "inline" if (ctype == "application/pdf" or ctype.startswith("image/")) else "attachment"
+    resp["Content-Disposition"] = f'{disp}; filename="file_{id_val}.{ctype.split("/")[-1]}"'
+    return resp
+
+serve_hotel_bill_by_id          = _serve_blob("SELECT bill_photo FROM hotel_accomodation WHERE hotel_acc_id=%s LIMIT 1", param=None)
+serve_misc_bill_by_id           = _serve_blob("SELECT bill_photo FROM miscellaneous_expenses WHERE miscel_expense_id=%s LIMIT 1", param=None)
+
+import json
+from django.views.decorators.csrf import csrf_exempt
+from django.db import connection, transaction
+from django.http import JsonResponse, HttpResponseBadRequest
+
+def _ok(data=None, status=200):
+    return JsonResponse({"ok": True, "data": data or {}}, status=status)
+
+def _err(msg, status=400):
+    return JsonResponse({"ok": False, "error": msg}, status=status)
+
+def _get_json_or_form(request):
+    # supports multipart (FormData) or JSON
+    ctype = (request.META.get("CONTENT_TYPE") or "").lower()
+    if ctype.startswith("application/json"):
+        try:
+            return json.loads(request.body.decode("utf-8") or "{}"), {}
+        except Exception:
+            return {}, {}
+    # multipart: normal fields in POST, files in FILES
+    return request.POST.dict(), request.FILES
+def _mode_meta(name):
+    if not name: return {"fixed_status": 0, "price": Decimal("0")}
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT COALESCE(fixed_status,0), COALESCE(price,0)
+            FROM master_transport_mode
+            WHERE LOWER(TRIM(mode_of_transport)) = LOWER(TRIM(%s))
+            LIMIT 1
+        """, [name])
+        row = cur.fetchone()
+    if not row: return {"fixed_status": 0, "price": Decimal("0")}
+    return {"fixed_status": int(row[0] or 0), "price": Decimal(str(row[1] or "0"))}
+
+
+@csrf_exempt
+def api_create_travel_voucher_DEPRECATED(request):
+    """
+    Create TRAVEL voucher with optional section arrays.
+    Accepts application/json or multipart (arrays as JSON strings).
+    Only the sections that are present will be inserted.
+    """
+    if request.method != "POST":
+        return _err("Only POST allowed", 405)
+
+    body, files = _get_json_or_form(request)
+
+    def parse_arr(v):
+        if not v: return []
+        if isinstance(v, list): return v
+        if isinstance(v, str):
+            s = v.strip()
+            if s.startswith('['):
+                try: return json.loads(s)
+                except Exception: return []
+        return []
+
+    voucher      = parse_arr(body.get("voucher"))
+    travel       = parse_arr(body.get("travel"))
+    travel_fare  = parse_arr(body.get("travel_fare"))
+    local_fare   = parse_arr(body.get("local_fare"))
+    hotels       = parse_arr(body.get("hotel_accomodation"))
+    da_entries   = parse_arr(body.get("food"))
+    misc_entries = parse_arr(body.get("miscellaneous_expenses"))
+
+    if not voucher or not travel:
+        return _err("voucher[] and travel[] are required at minimum.", 400)
+
+    v0 = voucher[0] or {}
+    t0 = travel[0] or {}
+
+    username     = (v0.get("username") or "").strip()
+    emp_id       = _get_emp_id_from_request(request, username)
+    if emp_id is None:
+        return _err("Employee not found or not logged in.", 401)
+
+    upload_date  = _normalize_date(v0.get("upload_date") or "")
+    expense_date = _normalize_date(v0.get("expense_date") or "")
+    work_order   = (v0.get("work_order_no") or "").strip()
+    voucher_type = (v0.get("voucher_type") or "TRAVEL").strip().upper()
+
+    if not (work_order and upload_date and (t0.get("from_date") and t0.get("to_date"))):
+        return _err("Missing required travel details (work_order/upload_date/from/to).", 400)
+
+    voucher_id = _generate_voucher_id(emp_id, upload_date, voucher_type)
+    status = _manager_approve_seq_for(emp_id)
+
+
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            # Header
+            cur.execute("""
+                INSERT INTO voucher (voucher_id, work_order_no, upload_date, expense_date, voucher_type, total_amount, emp_id, status)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
+            """, [voucher_id, work_order, upload_date, expense_date or upload_date, voucher_type, float(v0.get("total_amount") or 0) or 0, emp_id, status]
+            )
+
+            cur.execute("""
+                INSERT INTO travel (voucher_id, projectname, place, purpose_journey, place_visit, from_date, to_date, visit_authorised)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            """, [
+                voucher_id,
+                t0.get("projectname") or "",
+                t0.get("place") or "",
+                t0.get("purpose_journey") or "",
+                t0.get("place_visit") or t0.get("place") or "",
+                t0.get("from_date") or None,
+                t0.get("to_date") or None,
+                t0.get("visit_authorised") or t0.get("visit_authorised") or ""
+            ])
+
+            cur.execute("SELECT travel_id FROM travel WHERE voucher_id=%s ORDER BY travel_id DESC LIMIT 1", [voucher_id])
+            r = cur.fetchone()
+            if not r:
+                raise Exception("Failed to obtain travel_id")
+            travel_id = int(r[0])
+
+            # Helper: lookup mode meta
+            def _mode_meta(name):
+                if not name: return {"fixed_status": 0, "price": D(0)}
+                with connection.cursor() as c2:
+                    c2.execute("""
+                        SELECT COALESCE(fixed_status,0), COALESCE(price,0)
+                        FROM master_transport_mode
+                        WHERE LOWER(TRIM(mode_of_transport)) = LOWER(TRIM(%s))
+                        LIMIT 1
+                    """, [name])
+                    rr = c2.fetchone()
+                if not rr: return {"fixed_status": 0, "price": D(0)}
+                return {"fixed_status": int(rr[0] or 0), "price": D(rr[1])}
+
+            # travel_fare
+            for it in travel_fare:
+                if not isinstance(it, dict): continue
+                mode = it.get("mode_transport") or it.get("mode_trasport") or ""
+                meta = _mode_meta(mode)
+                fixed = meta["fixed_status"]
+                price = meta["price"]
+                km = D(it.get("km") or it.get("number_km"), "0")
+                if fixed == 1:
+                    amount = (km * price).quantize(Decimal("0.01"))
+                else:
+                    amount = D(it.get("amount") or it.get("cost"), "0.00").quantize(Decimal("0.01"))
+
+                cur.execute("""
+                    INSERT INTO travel_fare
+                    (travel_id, from_place, to_place, departure_date, departure_time, arrival_date, arrival_time, mode_transport, cost, bill_photo)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, [
+                    travel_id,
+                    it.get("from_place") or "",
+                    it.get("to_place") or "",
+                    it.get("departure_date") or None,
+                    it.get("departure_time") or None,
+                    it.get("arrival_date") or None,
+                    it.get("arrival_time") or None,
+                    mode,
+                    str(amount),
+                    b64bytes(it.get("bill_photo"))
+                ])
+
+            # local_fare
+            for it in local_fare:
+                if not isinstance(it, dict): continue
+                mode = it.get("mode_transport") or it.get("mode_trasport") or ""
+                meta = _mode_meta(mode)
+                fixed = meta["fixed_status"]
+                price = meta["price"]
+                km_val = D(it.get("number_km") or it.get("km"), "0")
+                if fixed == 1:
+                    amount = (km_val * price).quantize(Decimal("0.01"))
+                    km_out = str(km_val)
+                else:
+                    amount = D(it.get("amount"), "0.00").quantize(Decimal("0.01"))
+                    km_out = None
+
+                cur.execute("""
+                    INSERT INTO local_fare
+                    (travel_id, uploaded_date, fromplace, toplace, mode_transport, number_km, amount, ref_image)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                """, [
+                    travel_id,
+                    it.get("date") or None,
+                    it.get("fromplace") or "",
+                    it.get("toplace") or "",
+                    mode,
+                    km_out,
+                    str(amount),
+                    b64bytes(it.get("ref_image"))
+                ])
+
+            # hotel_accomodation
+            for it in hotels:
+                if not isinstance(it, dict): continue
+                amt = D(it.get("total_amount"), "0.00").quantize(Decimal("0.01"))
+                cur.execute("""
+                    INSERT INTO hotel_accomodation
+                    (travel_id, checkin_date, checkin_time, checkout_date, checkout_time, hotel_name, adress, total_amount, bill_photo)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, [
+                    travel_id,
+                    it.get("checkin_date") or None,
+                    it.get("checkin_time") or None,
+                    it.get("checkout_date") or None,
+                    it.get("checkout_time") or None,
+                    it.get("hotel_name") or "",
+                    it.get("adress") or "",
+                    str(amt),
+                    b64bytes(it.get("bill_photo"))
+                ])
+
+            # food (DA)
+            for it in da_entries:
+                if not isinstance(it, dict): continue
+                fd = it.get("fromdate") or it.get("from_date")
+                td = it.get("todate") or it.get("to_date")
+                days = it.get("number_days")
+                if not days and fd and td:
+                    try:
+                        from datetime import datetime as _dt
+                        d1 = _dt.strptime(fd, "%Y-%m-%d").date()
+                        d2 = _dt.strptime(td, "%Y-%m-%d").date()
+                        days = (d2 - d1).days + 1 if d2 >= d1 else 0
+                    except Exception:
+                        days = 0
+                amt = D(it.get("amount"), "0.00").quantize(Decimal("0.01"))
+                cur.execute("""
+                    INSERT INTO food (travel_id, fromdate, todate, number_days, amount)
+                    VALUES (%s,%s,%s,%s,%s)
+                """, [travel_id, fd or None, td or None, int(days or 0), str(amt)])
+
+            # misc
+            for it in misc_entries:
+                if not isinstance(it, dict): continue
+                amt = D(it.get("amount"), "0.00").quantize(Decimal("0.01"))
+                cur.execute("""
+                    INSERT INTO miscellaneous_expenses
+                    (travel_id, uploaded_date, particulars, amount, bill_photo)
+                    VALUES (%s,%s,%s,%s,%s)
+                """, [
+                    travel_id,
+                    it.get("date") or None,
+                    it.get("particulars") or it.get("perticulers") or "",
+                    str(amt),
+                    b64bytes(it.get("bill_photo"))
+                ])
+
+            # recompute and update voucher.total_amount from DB
+            total = recompute_voucher_total(cur, voucher_id, travel_id)
+            # conn.commit()
+            def _sum(sql):
+                cur.execute(sql, [travel_id])
+                rr = cur.fetchone()
+                return D(rr[0], "0.00") if rr and rr[0] is not None else D("0.00")
+
+            sum_fare  = _sum("SELECT COALESCE(SUM(cost),0) FROM travel_fare WHERE travel_id=%s")
+            sum_local = _sum("SELECT COALESCE(SUM(amount),0) FROM local_fare WHERE travel_id=%s")
+            sum_hotel = _sum("SELECT COALESCE(SUM(total_amount),0) FROM hotel_accomodation WHERE travel_id=%s")
+            sum_food  = _sum("SELECT COALESCE(SUM(amount),0) FROM food WHERE travel_id=%s")
+            sum_misc  = _sum("SELECT COALESCE(SUM(amount),0) FROM miscellaneous_expenses WHERE travel_id=%s")
+            # grand_total = (sum_fare + sum_local + sum_hotel + sum_food + sum_misc).quantize(Decimal("0.01"))
+
+            cur.execute("UPDATE voucher SET total_amount=%s WHERE voucher_id=%s", [str(total), voucher_id])
+
+    return _ok({"voucher_id": voucher_id, "travel_id": travel_id, "total_amount": float(total)}, status=201)
+from decimal import Decimal
+
+def recompute_voucher_total(cur, voucher_id, travel_id):
+    """
+    Recomputes total from child tables and updates voucher.total_amount.
+    Child tables & columns assumed:
+      travel_fare(cost), local_fare(amount), hotel_accommodation(amount),
+      food(amount), miscellaneous_expenses(amount)
+    """
+    def _sum(table, col):
+        cur.execute(f"SELECT COALESCE(SUM({col}),0) FROM {table} WHERE travel_id=%s", [travel_id])
+        return Decimal(str(cur.fetchone()[0] or 0))
+
+    total = Decimal("0.00")
+    total += _sum("travel_fare", "cost")
+    total += _sum("local_fare", "amount")
+    total += _sum("hotel_accommodation", "amount")
+    total += _sum("food", "amount")
+    total += _sum("miscellaneous_expenses", "amount")
+
+    # persist on voucher (store as string to avoid float issues in drivers)
+    cur.execute("UPDATE voucher SET total_amount=%s WHERE voucher_id=%s", [str(total), voucher_id])
+    return total
+
+@require_GET
+def master_travel_list(request):
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT DISTINCT purpose_journey, visit_authorise_name
+            FROM master_travel
+            ORDER BY purpose_journey NULLS LAST, visit_authorise_name NULLS LAST
+        """)
+        rows = cur.fetchall()
+    data = [{"purpose_journey": r[0], "visit_authorise_name": r[1]} for r in rows]
+    return JsonResponse(data, safe=False)
+
+@csrf_exempt
+def api_create_expense_voucher(request):
+    """
+    Accepts JSON or multipart form.
+
+    JSON:
+      { "items":[{"date":"YYYY-MM-DD","particulars":"Conveyance","amount":123.45}, ...] }
+
+    multipart/form-data:
+      items=<the JSON above>
+      + optional per-row files: expense_files_0, expense_files_1, ...
+      + or a single 'bill' to apply to all rows
+
+    Writes:
+      expense(voucher_id, expense_type, total_amount, bill_photo)
+      voucher(total_amount = sum of row amounts)
+    """
+    if request.method != "POST":
+        return _err("Only POST allowed", 405)
+
+    body, files = _get_json_or_form(request)
+
+    # items list
+    raw_items = body.get("items") or body.get("cash_items") or []
+    if isinstance(raw_items, str):
+        try:
+            items = json.loads(raw_items) if raw_items.strip() else []
+        except Exception:
+            items = []
+    else:
+        items = raw_items
+
+    if not items or not isinstance(items, list):
+        return _err("No expense items provided.")
+
+    # files: per-row or single default
+    bills_by_index = {}
+    if files:
+        for k, f in files.items():
+            if k.startswith("expense_files_"):
+                try:
+                    idx = int(k.split("_")[-1])
+                    bills_by_index[idx] = f
+                except Exception:
+                    pass
+    default_bill = files.get("bill") if files else None
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+    try:
+        b = _parse_voucher_json(request)
+    except ValueError as e:
+        return _err(str(e), 400)
+
+    # compute grand total
+    try:
+        grand_total = round(sum(float(i.get("amount") or 0) for i in items), 2)
+    except Exception:
+        return _err("Amounts must be numeric.")
+    v_type = "expense"
+    upload_date  = (body.get("upload_date") or body.get("date") or "").strip()
+    expense_date = (body.get("expense_date") or body.get("bill_date") or "").strip()
+    # work_order  = (b.get('workordernumber') or b.get('work_order_no') or '').strip()
+    work_order_no = (b.get("work_order_no") or b.get("work_order_number") or "").strip()
+    
+    auth   = request.session.get("auth") or {}
+    emp_id = int(auth.get("emp_id")) if str(auth.get("emp_id") or "").isdigit() else None
+    if emp_id is None:
+        return _err("Not authenticated: emp_id missing in session.", 401)
+
+    status = _manager_approve_seq_for(emp_id)
+    
+    if emp_id is None:
+        return _err("Not authenticated: emp_id missing in session.", 401)
+
+    voucher_id = _generate_voucher_id(emp_id, upload_date or None, v_type)
+
+    try:
+        emp_id = int(auth.get("emp_id")) if auth.get("emp_id") is not None else None
+    except Exception:
+        emp_id = None
+
+    try:
+        with transaction.atomic():
+            # create header (generate EV id if none supplied)
+            if not voucher_id:
+                voucher_id = _generate_voucher_id(emp_id, upload_date or None,v_type) if emp_id else None
+
+            with connection.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO voucher (voucher_id,work_order_no, upload_date, expense_date, voucher_type, total_amount, Emp_id,status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, [
+                    voucher_id, work_order_no, (upload_date or None), (expense_date or None),
+                    'expense', grand_total, emp_id,status
+                ])
+
+            # each expense line
+            with connection.cursor() as cur:
+                for idx, it in enumerate(items):
+                    particulars = (it.get("particulars") or it.get("expense_type") or "").strip()
+                    remarks = (it.get("remarks") or  "").strip()
+                    amount = float(it.get("amount") or 0)
+                    bill = bills_by_index.get(idx) or default_bill
+                    bill_bytes = bill.read() if bill else None
+                    cur.execute(
+                        "INSERT INTO expense (voucher_id, expense_type, total_amount,remarks, bill_photo) VALUES (%s, %s, %s, %s, %s)",
+                        [voucher_id, particulars, amount, remarks, bill_bytes]
+                    )
+                    _insert_voucher_status_row(voucher_id, emp_id)
+
+        return _ok({
+            "voucher_id": voucher_id,
+            "total_amount": grand_total,
+        }, status=201)
+    except Exception as e:
+        return _err(f"DB error: {e}", 500)
+    
+def api_master_travel_lists(request):
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT DISTINCT purpose_journey
+            FROM master_travel
+            WHERE purpose_journey IS NOT NULL AND TRIM(purpose_journey) <> ''
+            ORDER BY purpose_journey
+        """)
+        purposes = [r[0] for r in cur.fetchall()]
+
+        cur.execute("""
+            SELECT DISTINCT visit_authoriser_name
+            FROM master_travel
+            WHERE visit_authoriser_name IS NOT NULL AND TRIM(visit_authoriser_name) <> ''
+            ORDER BY visit_authoriser_name
+        """)
+        authorisers = [r[0] for r in cur.fetchall()]
+
+    return JsonResponse({
+        "purpose_journey": purposes,
+        "visit_authoriser_name": authorisers,
+    })
+
+def api_auth_me(request):
+    """Return basic user info and approve_seq for UI gating.
+
+    Response JSON:
+      { name: str, designation: str, approve_seq: int }
+    """
+    auth = request.session.get("auth") or {}
+    name = request.session.get("display_name") or auth.get("username") or ""
+    designation = request.session.get("role") or auth.get("role") or request.session.get("designation") or ""
+
+    approve_seq = 0
+    emp_id = 0
+    try:
+        emp_id = int(auth.get("emp_id") or 0)
+    except Exception:
+        emp_id = 0
+    if emp_id:
+        try:
+            with connection.cursor() as cur:
+                cur.execute("SELECT COALESCE(approve_seq,0) FROM Credentials WHERE emp_id=%s LIMIT 1", [emp_id])
+                row = cur.fetchone()
+                if row and row[0] is not None:
+                    approve_seq = int(row[0])
+        except Exception:
+            # On any DB error, keep default 0 to be safe
+            approve_seq = 0
+
+    return JsonResponse({"name": name, "designation": designation, "approve_seq": approve_seq})
+# # Optional: master/travel list (to feed Purpose / Authorised selects)
+# def master_travel_list(request):
+#     try:
+#         with connection.cursor() as cur:
+#             cur.execute("SELECT purpose_journey, visit_authoriser_name, food_per_day, status FROM master_travel")
+#             rows = cur.fetchall()
+#         data = [
+#             {
+#                 "purpose_journey": r[0],
+#                 "visit_authoriser_name": r[1],
+#                 "food_per_day": r[2],
+#                 "status": r[3],
+#             }
+#             for r in rows
+#         ]
+#         return JsonResponse(data, safe=False)
+#     except Exception as e:
+#         return _err(f"Master load failed: {e}", 500)
+
+
+
+
+@require_GET
+def api_master_food_rate(request):
+    """Return food_per_day rate for a given purpose_journey (max if not found)."""
+    purpose = (request.GET.get("purpose") or "").strip()
+    try:
+        with connection.cursor() as cur:
+            if purpose:
+                cur.execute("""SELECT COALESCE(MAX(food_per_day), 0)
+                                 FROM master_travel
+                                 WHERE purpose_journey=%s""", [purpose])
+            else:
+                cur.execute("""SELECT COALESCE(MAX(food_per_day), 0)
+                                 FROM master_travel""")
+            row = cur.fetchone()
+            rate = float(row[0] or 0)
+        return JsonResponse({ "ok": True, "data": { "food_per_day": rate } })
+    except Exception as e:
+        return JsonResponse({ "ok": False, "error": f"rate lookup failed: {e}" }, status=500)
+
+@require_GET
+def api_master_transport_modes(request):
+    """
+    Returns transport modes with fixed_status and price/UOM, e.g.:
+    [{"mode_of_transport":"Bike","fixed_status":1,"price":"4.50","UOM":"km"}, ...]
+    """
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT mode_of_transport, COALESCE(fixed_status,0), price, COALESCE(UOM,'')
+            FROM master_transport_mode
+            ORDER BY mode_of_transport
+        """)
+        rows = cur.fetchall()
+
+    data = [
+        {
+            "mode_of_transport": r[0],
+            "fixed_status": int(r[1] or 0),
+            "price": str(r[2] if r[2] is not None else 0),
+            "UOM": r[3],
+        }
+        for r in rows
+    ]
+    return JsonResponse(data, safe=False)
+
+
+def _travel_purpose_rate(purpose_name: str) -> float:
+    """
+    Returns food_per_day (DA) for a given travel purpose from master_travel (or similar) table.
+    Falls back to 250 if not found.
+    """
+    if not purpose_name:
+        return 250.0
+    try:
+        with connection.cursor() as cur:
+            # Try common schemas: (purpose, food_per_day) or (purpose_name, da)
+            cur.execute("""
+                SELECT COALESCE(MAX(food_per_day), MAX(da), MAX(rate), 0)
+                FROM master_travel
+                WHERE LOWER(purpose)=LOWER(%s) OR LOWER(purpose_name)=LOWER(%s) OR LOWER(purpose_journey)=LOWER(%s)
+            """, [purpose_name, purpose_name, purpose_name])
+            row = cur.fetchone()
+            if row and row[0]:
+                return float(row[0])
+    except Exception:
+        pass
+    return 250.0
+
+
+@csrf_exempt
+def api_save_travel_voucher(request):
+    """
+    Save TRAVEL voucher using strict JSON like the user's example.
+    Body shape:
+    {
+      "voucher": [ {...} ],
+      "travel": [ {...} ],
+      "travel_fare": [ {...} ],
+      "local_fare": [ {...} ],
+      "hotel_accomodation": [ {...} ],
+      "food": [ {...} ],
+      "miscellaneous_expenses": [ {...} ]
+    }
+    Only present, non-empty sections are inserted.
+    File-like fields must be base64 strings (raw or data URLs).
+    """
+    if request.method != "POST":
+        return _err("Only POST allowed", 405)
+
+    try:
+        body = json.loads((request.body or b"").decode("utf-8") or "{}")
+    except Exception:
+        return _err("Invalid JSON", 400)
+
+    def arr(key):
+        v = body.get(key)
+        if isinstance(v, list):
+            return v
+        return []
+
+    voucher      = arr("voucher")
+    travel       = arr("travel")
+    travel_fare  = arr("travel_fare")
+    local_fare   = arr("local_fare")
+    hotels       = arr("hotel_accomodation")
+    da_entries   = arr("food")
+    misc_entries = arr("miscellaneous_expenses")
+
+    if not voucher or not travel:
+        return _err("voucher[] and travel[] are required at minimum.", 400)
+
+    v0 = dict(voucher[0] or {})
+    t0 = dict(travel[0] or {})
+
+    username     = (v0.get("username") or "").strip()
+    emp_id       = _get_emp_id_from_request(request, username)
+    if emp_id is None:
+        return _err("Employee not found or not logged in.", 401)
+
+    upload_date  = _normalize_date(v0.get("upload_date") or "")
+    expense_date = _normalize_date(v0.get("expense_date") or "") or upload_date
+    work_order   = (v0.get("work_order_no") or "").strip()
+    voucher_type = (v0.get("voucher_type") or "TRAVEL").strip().upper()
+
+    if not (work_order and upload_date and (t0.get("from_date") and t0.get("to_date"))):
+        return _err("Missing required travel details (work_order/upload_date/from/to).", 400)
+
+    voucher_id = _generate_voucher_id(emp_id, upload_date, voucher_type)
+    status = _manager_approve_seq_for(emp_id)
+
+    grand_total = 0.0
+    travel_id = None
+
+    try:
+        with transaction.atomic():
+
+            # Header
+            with connection.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO voucher (voucher_id, work_order_no, upload_date, expense_date, voucher_type, total_amount, emp_id,status)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                """, [voucher_id, work_order, upload_date, expense_date, voucher_type, float(v0.get("total_amount") or 0) or 0, emp_id,status])
+
+                cur.execute("""
+                    INSERT INTO travel (voucher_id, projectname, place, purpose_journey, place_visit, from_date, to_date, visit_authorised)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                """, [
+                    voucher_id,
+                    t0.get("projectname") or "",
+                    t0.get("place") or "",
+                    t0.get("purpose_journey") or "",
+                    t0.get("place_visit") or (t0.get("place") or ""),
+                    t0.get("from_date") or None,
+                    t0.get("to_date") or None,
+                    t0.get("visit_autherized") or t0.get("visit_authorised") or ""  # accept either spelling
+                ])
+                _insert_voucher_status_row(voucher_id, emp_id)
+                cur.execute("SELECT travel_id FROM travel WHERE voucher_id=%s ORDER BY travel_id DESC LIMIT 1", [voucher_id])
+                row = cur.fetchone()
+                if not row:
+                    raise Exception("Failed to obtain travel_id")
+                travel_id = int(row[0])
+
+            # (A) Travel Fare
+            if isinstance(travel_fare, list) and travel_fare:
+                with connection.cursor() as cur:
+                    for it in travel_fare:
+                        if not isinstance(it, dict): continue
+                        dep_d  = it.get("departure_date") or ""
+

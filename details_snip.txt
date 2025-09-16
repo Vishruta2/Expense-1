@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Employee Dashboard</title>
+  {% load static %}
+  <style>
+    :root{
+      --primary:#4CAF50; --primary-hover:#2e7d32; --pastel-dark:#81c784;
+      --card-shadow:0 10px 26px rgba(0,0,0,.08); --muted:#6b7280; --text:#0f172a;
+      --nav:#0e1f17;
+      --field-max: 360px;            /* NEW: narrow inputs like typical sites */
+      --field-max-wide: 260px;       /* NEW: for table cells */
+      --field-pad: 8px;              /* NEW: compact padding */
+      --field-font: 13px;            /* NEW: compact font-size */
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,Arial,sans-serif;background:var(--pastel-dark);min-height:100vh;color:var(--text);}
+    .logo-header{background:#000;padding:10px 18px;display:flex;align-items:center}
+    .logo{height:35px;width:auto}
+
+    /* NAVBAR */
+    .topnav{display:flex;gap:16px;align-items:center;background:var(--nav);color:#d1fae5;padding:12px 20px;position:sticky;top:0;z-index:50;box-shadow:0 2px 10px rgba(0,0,0,.2)}
+    .nav-title{font-weight:800;letter-spacing:.4px;margin-right:auto;color:#a7f3d0}
+    .nav-btn{display:inline-flex;align-items:center;gap:10px;padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#e2e8f0;cursor:pointer;font-weight:700;transition:.18s}
+    .nav-btn:hover,.nav-btn.active{background:#113f2e;border-color:#32d399;color:#d1fae5;transform:translateY(-1px)}
+    .ic{font-size:18px}
+
+    .container{background:#fff;margin:24px;border-radius:16px;box-shadow:var(--card-shadow);padding:22px}
+    .content{min-height:64vh}
+    .page{display:none}
+    .page.active{display:block}
+    .content-card{background:#fff;border:1px solid #e9eef4;border-radius:16px;box-shadow:var(--card-shadow);padding:20px}
+
+    .btn,.btn-primary{display:inline-flex;justify-content:center;align-items:center;gap:8px;background:var(--primary);color:#fff;border:none;border-radius:12px;padding:10px 12px;font-weight:700;cursor:pointer;transition:.18s;font-size:14px}
+    .btn:hover,.btn-primary:hover{background:var(--primary-hover);transform:translateY(-1px)}
+    .btn-secondary{background:#e9ecef;color:#111;border:1px solid #d0d7de;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:13px}
+    .btn-ghost{background:#e8f5e9;color:#256029;border:1px solid #c8e6c9;border-radius:999px;padding:6px 10px;font-weight:700;font-size:13px}
+
+    .top-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}

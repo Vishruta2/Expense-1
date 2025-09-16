@@ -1,0 +1,5 @@
+{
+    "chatgpt.openOnStartup": true,
+    "CodeGPT.apiKey": "CodeGPT Plus Beta",
+    "chatgpt.commentCodeLensEnabled": false
+}
